@@ -37,32 +37,161 @@ Add to your Claude Code MCP configuration:
 }
 ```
 
-## Features
+## Available MCP Tools
 
-- **GPU Price Quotes**: Real-time pricing across 11+ cloud providers
-- **GPU Provisioning**: Launch instances with automatic cost optimization
-- **Kubernetes Clusters**: Multi-cloud K8s with GPU nodes
-- **Inference Deployment**: Serverless model serving with InferX
-- **HuggingFace Spaces**: Public model deployment
-- **Cost Analytics**: Track and optimize cloud spending
+The Terradev MCP server provides 17 tools for complete GPU cloud management:
 
-## Quick Start
+### GPU Operations
+- **`quote_gpu`** - Get real-time GPU prices across all cloud providers
+- **`provision_gpu`** - Provision GPU instances with cost optimization
 
+### Kubernetes Management  
+- **`k8s_create`** - Create Kubernetes clusters with GPU nodes
+- **`k8s_list`** - List all Kubernetes clusters
+- **`k8s_info`** - Get detailed cluster information
+- **`k8s_destroy`** - Destroy Kubernetes clusters
+
+### Inference & Model Deployment
+- **`inferx_deploy`** - Deploy models to InferX serverless platform
+- **`inferx_status`** - Check inference endpoint status
+- **`inferx_list`** - List deployed inference models
+- **`inferx_optimize`** - Get cost analysis for inference endpoints
+- **`hf_space_deploy`** - Deploy models to HuggingFace Spaces
+
+### Instance & Cost Management
+- **`status`** - View all instances and costs
+- **`manage_instance`** - Stop/start/terminate GPU instances
+- **`analytics`** - Get cost analytics and spending trends
+- **`optimize`** - Find cheaper alternatives for running instances
+
+### Provider Configuration
+- **`setup_provider`** - Get setup instructions for any cloud provider
+- **`configure_provider`** - Configure provider credentials locally
+
+## Complete Command Reference
+
+### GPU Price Quotes
 ```bash
-# Check MCP connection
-/mcp
-
-# Find cheapest H100
+# Get prices for specific GPU type
 terradev quote -g H100
 
-# Provision 4 A100s
-terradev provision -g A100 -n 4 --parallel 6
+# Filter by specific providers
+terradev quote -g A100 -p runpod,vastai,lambda
 
-# Create K8s cluster
-terradev k8s create my-cluster --gpu H100 --count 4 --multi-cloud
+# Quick-provision cheapest option
+terradev quote -g H100 --quick
 ```
 
-## Supported Providers
+### GPU Provisioning
+```bash
+# Provision single GPU
+terradev provision -g A100
+
+# Provision multiple GPUs in parallel
+terradev provision -g H100 -n 4 --parallel 6
+
+# Dry run to see plan without launching
+terradev provision -g A100 -n 8 --dry-run
+
+# Set maximum price ceiling
+terradev provision -g A100 --max-price 2.50
+
+# Prefer spot instances for cost savings
+terradev provision -g H100 --prefer-spot
+```
+
+### Kubernetes Clusters
+```bash
+# Create multi-cloud K8s cluster
+terradev k8s create my-cluster --gpu H100 --count 4 --multi-cloud --prefer-spot
+
+# List all clusters
+terradev k8s list
+
+# Get cluster details
+terradev k8s info my-cluster
+
+# Destroy cluster
+terradev k8s destroy my-cluster
+```
+
+### Inference Deployment
+```bash
+# Deploy model to InferX
+terradev inferx deploy --model meta-llama/Llama-2-7b-hf --gpu-type a10g
+
+# Check endpoint status
+terradev inferx status
+
+# List deployed models
+terradev inferx list
+
+# Get cost analysis
+terradev inferx optimize
+```
+
+### HuggingFace Spaces
+```bash
+# Deploy LLM template
+terradev hf-space my-llama --model-id meta-llama/Llama-2-7b-hf --template llm
+
+# Deploy with custom hardware
+terradev hf-space my-model --model-id microsoft/DialoGPT-medium --hardware a10g-large --sdk gradio
+
+# Deploy embedding model
+terradev hf-space my-embeddings --model-id sentence-transformers/all-MiniLM-L6-v2 --template embedding
+```
+
+### Instance Management
+```bash
+# View all running instances and costs
+terradev status --live
+
+# Stop instance
+terradev manage -i <instance-id> -a stop
+
+# Start instance
+terradev manage -i <instance-id> -a start
+
+# Terminate instance
+terradev manage -i <instance-id> -a terminate
+```
+
+### Analytics & Optimization
+```bash
+# Get 30-day cost analytics
+terradev analytics --days 30
+
+# Find cheaper alternatives
+terradev optimize
+```
+
+### Provider Setup
+```bash
+# Get quick setup instructions
+terradev setup runpod --quick
+terradev setup aws --quick
+terradev setup vastai --quick
+
+# Configure credentials (stored locally)
+terradev configure --provider runpod
+terradev configure --provider aws
+terradev configure --provider vastai
+```
+
+## Supported GPU Types
+
+- **H100** - NVIDIA H100 80GB (premium training)
+- **A100** - NVIDIA A100 80GB (training/inference)  
+- **A10G** - NVIDIA A10G 24GB (inference)
+- **L40S** - NVIDIA L40S 48GB (rendering/inference)
+- **L4** - NVIDIA L4 24GB (inference)
+- **T4** - NVIDIA T4 16GB (light inference)
+- **RTX4090** - NVIDIA RTX 4090 24GB (consumer)
+- **RTX3090** - NVIDIA RTX 3090 24GB (consumer)
+- **V100** - NVIDIA V100 32GB (legacy)
+
+## Supported Cloud Providers
 
 RunPod, Vast.ai, AWS, GCP, Azure, Lambda Labs, CoreWeave, TensorDock, Oracle Cloud, Crusoe Cloud, DigitalOcean, HyperStack
 

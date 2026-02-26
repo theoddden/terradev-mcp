@@ -211,6 +211,208 @@ async def execute_terraform_parallel(gpu_type: str, count: int, providers: List[
                 "returncode": -1
             }
 
+def generate_k8s_terraform_config(cluster_name: str, gpu_type: str, node_count: int, multi_cloud: bool = False, prefer_spot: bool = True) -> str:
+    """Generate Terraform configuration for Kubernetes clusters"""
+    
+    config = f"""
+terraform {{
+  required_providers {{
+    terradev = {{
+      source  = "theoddden/terradev"
+      version = "~> 3.0"
+    }}
+    kubernetes = {{
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.20"
+    }}
+  }}
+}}
+
+variable "cluster_name" {{
+  description = "Kubernetes cluster name"
+  type        = string
+  default     = "{cluster_name}"
+}}
+
+variable "gpu_type" {{
+  description = "GPU type for nodes"
+  type        = string
+  default     = "{gpu_type}"
+}}
+
+variable "node_count" {{
+  description = "Number of GPU nodes"
+  type        = number
+  default     = {node_count}
+}}
+
+variable "multi_cloud" {{
+  description = "Use multi-cloud node pools"
+  type        = bool
+  default     = {str(multi_cloud).lower()}
+}}
+
+variable "prefer_spot" {{
+  description = "Prefer spot instances"
+  type        = bool
+  default     = {str(prefer_spot).lower()}
+}}
+
+# Kubernetes cluster with GPU nodes
+resource "terradev_kubernetes_cluster" "main" {{
+  name        = var.cluster_name
+  gpu_type    = var.gpu_type
+  node_count  = var.node_count
+  spot        = var.prefer_spot
+  
+  tags = {{
+    Name        = var.cluster_name
+    Provisioned = "terraform"
+    GPU_Type    = var.gpu_type
+    MultiCloud  = var.multi_cloud
+  }}
+}}
+"""
+
+    if multi_cloud:
+        # Add multi-cloud node pools for enhanced resilience
+        providers = ["runpod", "vastai", "lambda", "aws"]
+        for i, provider in enumerate(providers[:node_count]):
+            config += f"""
+# Multi-cloud node pool - {provider}
+resource "terradev_node_pool" "pool_{i}" {{
+  cluster_name = terradev_kubernetes_cluster.main.name
+  provider     = "{provider}"
+  gpu_type     = var.gpu_type
+  node_count   = 1
+  spot         = var.prefer_spot
+  
+  depends_on = [terradev_kubernetes_cluster.main]
+  
+  tags = {{
+    Name        = "${{var.cluster_name}}-pool-{i}"
+    Provider    = "{provider}"
+    Provisioned = "terraform"
+  }}
+}}
+"""
+
+    # Add outputs
+    config += """
+# Cluster outputs
+output "cluster_name" {
+  description = "Kubernetes cluster name"
+  value       = terradev_kubernetes_cluster.main.name
+}
+
+output "cluster_endpoint" {
+  description = "Kubernetes API endpoint"
+  value       = terradev_kubernetes_cluster.main.endpoint
+}
+
+output "kubeconfig" {
+  description = "Kubernetes configuration"
+  value       = terradev_kubernetes_cluster.main.kubeconfig
+  sensitive   = true
+}
+
+output "node_pools" {
+  description = "Node pool information"
+  value = {
+"""
+    
+    if multi_cloud:
+        for i in range(min(node_count, len(providers))):
+            config += f'    pool_{i} = terradev_node_pool.pool_{i}[*].id,\n'
+    
+    config += """  }
+}
+"""
+    
+    return config
+
+def generate_inference_terraform_config(model: str, gpu_type: str, endpoint_name: str = None) -> str:
+    """Generate Terraform configuration for inference deployments"""
+    
+    endpoint_name = endpoint_name or f"inferx-{model.replace('/', '-').replace(':', '-')}"
+    
+    config = f"""
+terraform {{
+  required_providers {{
+    terradev = {{
+      source  = "theoddden/terradev"
+      version = "~> 3.0"
+    }}
+  }}
+}}
+
+variable "model" {{
+  description = "Model ID for deployment"
+  type        = string
+  default     = "{model}"
+}}
+
+variable "gpu_type" {{
+  description = "GPU type for inference"
+  type        = string
+  default     = "{gpu_type}"
+}}
+
+variable "endpoint_name" {{
+  description = "Inference endpoint name"
+  type        = string
+  default     = "{endpoint_name}"
+}}
+
+# InferX serverless endpoint
+resource "terradev_inference_endpoint" "main" {{
+  name        = var.endpoint_name
+  model       = var.model
+  gpu_type    = var.gpu_type
+  
+  tags = {{
+    Name        = var.endpoint_name
+    Model       = var.model
+    GPU_Type    = var.gpu_type
+    Provisioned = "terraform"
+  }}
+}}
+
+# HuggingFace Spaces deployment (optional)
+resource "terradev_hf_space" "main" {{
+  count       = contains(["A10G", "L4", "T4"], var.gpu_type) ? 1 : 0
+  name        = var.endpoint_name
+  model_id    = var.model
+  hardware    = var.gpu_type
+  sdk         = "gradio"
+  
+  tags = {{
+    Name        = var.endpoint_name
+    Model       = var.model
+    Hardware    = var.gpu_type
+    Provisioned = "terraform"
+  }}
+}}
+
+# Outputs
+output "endpoint_url" {
+  description = "Inference endpoint URL"
+  value       = terradev_inference_endpoint.main.url
+}
+
+output "endpoint_status" {
+  description = "Endpoint deployment status"
+  value       = terradev_inference_endpoint.main.status
+}
+
+output "hf_space_url" {
+  description = "HuggingFace Space URL"
+  value       = length(terradev_hf_space.main) > 0 ? terradev_hf_space.main[0].url : null
+}
+"""
+    
+    return config
+
 def generate_terraform_config(gpu_type: str, count: int, providers: List[str] = None, max_price: float = None) -> str:
     """Generate Terraform configuration for parallel GPU provisioning"""
     
@@ -499,7 +701,7 @@ async def handle_list_tools() -> ListToolsResult:
         ),
         Tool(
             name="k8s_create",
-            description="Create Kubernetes cluster with GPU nodes",
+            description="Create Kubernetes cluster with GPU nodes using Terraform for optimal multi-cloud deployment",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -520,12 +722,17 @@ async def handle_list_tools() -> ListToolsResult:
                     },
                     "multi_cloud": {
                         "type": "boolean",
-                        "description": "Use multi-cloud node pools",
+                        "description": "Use multi-cloud node pools for resilience",
                         "default": False
                     },
                     "prefer_spot": {
                         "type": "boolean",
-                        "description": "Prefer spot instances",
+                        "description": "Prefer spot instances for cost savings",
+                        "default": True
+                    },
+                    "use_terraform": {
+                        "type": "boolean",
+                        "description": "Use Terraform for infrastructure as code",
                         "default": True
                     }
                 },
@@ -570,7 +777,7 @@ async def handle_list_tools() -> ListToolsResult:
         ),
         Tool(
             name="inferx_deploy",
-            description="Deploy model to InferX serverless platform",
+            description="Deploy model to InferX serverless platform using Terraform for infrastructure as code",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -582,6 +789,15 @@ async def handle_list_tools() -> ListToolsResult:
                         "type": "string",
                         "description": "GPU type for inference",
                         "enum": ["H100", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "RTX3090", "V100"]
+                    },
+                    "endpoint_name": {
+                        "type": "string",
+                        "description": "Custom endpoint name (optional)"
+                    },
+                    "use_terraform": {
+                        "type": "boolean",
+                        "description": "Use Terraform for infrastructure as code",
+                        "default": True
                     }
                 },
                 "required": ["model", "gpu_type"]
@@ -644,16 +860,44 @@ async def handle_list_tools() -> ListToolsResult:
         ),
         Tool(
             name="status",
-            description="View all instances and costs",
+            description="View all instances and costs with Terraform state optimization",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "live": {
                         "type": "boolean",
-                        "description": "Show live status",
+                        "description": "Show live status vs cached Terraform state",
+                        "default": False
+                    },
+                    "use_terraform_state": {
+                        "type": "boolean",
+                        "description": "Use Terraform state for faster queries",
                         "default": True
+                    },
+                    "state_file": {
+                        "type": "string",
+                        "description": "Path to Terraform state file (optional)"
                     }
                 }
+            }
+        ),
+        Tool(
+            name="terraform_status",
+            description="Fast status query using Terraform state",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "config_dir": {
+                        "type": "string",
+                        "description": "Directory containing Terraform configuration"
+                    },
+                    "show_outputs": {
+                        "type": "boolean",
+                        "description": "Show Terraform outputs",
+                        "default": True
+                    }
+                },
+                "required": ["config_dir"]
             }
         ),
         Tool(
@@ -750,6 +994,7 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         "terraform_plan": ["terraform", "plan"],
         "terraform_apply": ["terraform", "apply"],
         "terraform_destroy": ["terraform", "destroy"],
+        "terraform_status": ["terraform", "status"],  # Fast state queries
         "k8s_create": ["k8s", "create"],
         "k8s_list": ["k8s", "list"],
         "k8s_info": ["k8s", "info"],
@@ -894,14 +1139,71 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             )
     
     elif tool_name == "k8s_create":
-        cmd_args.extend([arguments["cluster_name"]])
-        cmd_args.extend(["--gpu", arguments["gpu_type"]])
-        if "count" in arguments:
-            cmd_args.extend(["--count", str(arguments["count"])])
-        if arguments.get("multi_cloud"):
-            cmd_args.append("--multi-cloud")
-        if arguments.get("prefer_spot"):
-            cmd_args.append("--prefer-spot")
+        cluster_name = arguments["cluster_name"]
+        gpu_type = arguments["gpu_type"]
+        node_count = arguments.get("count", 1)
+        multi_cloud = arguments.get("multi_cloud", False)
+        prefer_spot = arguments.get("prefer_spot", True)
+        use_terraform = arguments.get("use_terraform", True)
+        
+        if use_terraform:
+            # Use Terraform for optimal multi-cloud K8s deployment
+            with tempfile.TemporaryDirectory() as temp_dir:
+                try:
+                    # Generate K8s Terraform configuration
+                    k8s_config = generate_k8s_terraform_config(
+                        cluster_name, gpu_type, node_count, multi_cloud, prefer_spot
+                    )
+                    
+                    # Write configuration files
+                    main_tf_path = os.path.join(temp_dir, "main.tf")
+                    with open(main_tf_path, 'w') as f:
+                        f.write(k8s_config)
+                    
+                    # Initialize and apply Terraform
+                    init_result = await execute_terraform_command(["terraform", "init"], temp_dir)
+                    if not init_result["success"]:
+                        return CallToolResult(
+                            content=[TextContent(type="text", text=f"❌ Terraform init failed: {init_result['stderr']}")],
+                            isError=True
+                        )
+                    
+                    apply_result = await execute_terraform_command(["terraform", "apply", "-auto-approve"], temp_dir)
+                    
+                    if apply_result["success"]:
+                        output_text = f"✅ Kubernetes cluster created via Terraform!\n\n"
+                        output_text += f"**Cluster Name:** {cluster_name}\n"
+                        output_text += f"**GPU Type:** {gpu_type}\n"
+                        output_text += f"**Node Count:** {node_count}\n"
+                        output_text += f"**Multi-Cloud:** {multi_cloud}\n"
+                        output_text += f"**Spot Instances:** {prefer_spot}\n"
+                        output_text += f"\n**Terraform State:** Managed\n"
+                        output_text += f"**Full Output:**\n{apply_result['stdout']}"
+                        
+                        return CallToolResult(
+                            content=[TextContent(type="text", text=output_text)]
+                        )
+                    else:
+                        return CallToolResult(
+                            content=[TextContent(type="text", text=f"❌ Terraform apply failed: {apply_result['stderr']}")],
+                            isError=True
+                        )
+                        
+                except Exception as e:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=f"❌ K8s Terraform deployment failed: {str(e)}")],
+                        isError=True
+                    )
+        else:
+            # Fall back to regular terradev command
+            cmd_args.extend([cluster_name])
+            cmd_args.extend(["--gpu", gpu_type])
+            if "count" in arguments:
+                cmd_args.extend(["--count", str(arguments["count"])])
+            if multi_cloud:
+                cmd_args.append("--multi-cloud")
+            if prefer_spot:
+                cmd_args.append("--prefer-spot")
     
     elif tool_name == "k8s_info":
         cmd_args.append(arguments["cluster_name"])
@@ -910,8 +1212,59 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         cmd_args.append(arguments["cluster_name"])
     
     elif tool_name == "inferx_deploy":
-        cmd_args.extend(["--model", arguments["model"]])
-        cmd_args.extend(["--gpu-type", arguments["gpu_type"]])
+        model = arguments["model"]
+        gpu_type = arguments["gpu_type"]
+        endpoint_name = arguments.get("endpoint_name")
+        use_terraform = arguments.get("use_terraform", True)
+        
+        if use_terraform:
+            # Use Terraform for inference deployment
+            with tempfile.TemporaryDirectory() as temp_dir:
+                try:
+                    # Generate inference Terraform configuration
+                    inference_config = generate_inference_terraform_config(model, gpu_type, endpoint_name)
+                    
+                    # Write configuration files
+                    main_tf_path = os.path.join(temp_dir, "main.tf")
+                    with open(main_tf_path, 'w') as f:
+                        f.write(inference_config)
+                    
+                    # Initialize and apply Terraform
+                    init_result = await execute_terraform_command(["terraform", "init"], temp_dir)
+                    if not init_result["success"]:
+                        return CallToolResult(
+                            content=[TextContent(type="text", text=f"❌ Terraform init failed: {init_result['stderr']}")],
+                            isError=True
+                        )
+                    
+                    apply_result = await execute_terraform_command(["terraform", "apply", "-auto-approve"], temp_dir)
+                    
+                    if apply_result["success"]:
+                        output_text = f"✅ Inference endpoint deployed via Terraform!\n\n"
+                        output_text += f"**Model:** {model}\n"
+                        output_text += f"**GPU Type:** {gpu_type}\n"
+                        output_text += f"**Endpoint Name:** {endpoint_name or 'auto-generated'}\n"
+                        output_text += f"\n**Terraform State:** Managed\n"
+                        output_text += f"**Full Output:**\n{apply_result['stdout']}"
+                        
+                        return CallToolResult(
+                            content=[TextContent(type="text", text=output_text)]
+                        )
+                    else:
+                        return CallToolResult(
+                            content=[TextContent(type="text", text=f"❌ Terraform apply failed: {apply_result['stderr']}")],
+                            isError=True
+                        )
+                        
+                except Exception as e:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=f"❌ Inference Terraform deployment failed: {str(e)}")],
+                        isError=True
+                    )
+        else:
+            # Fall back to regular terradev command
+            cmd_args.extend(["--model", model])
+            cmd_args.extend(["--gpu-type", gpu_type])
     
     elif tool_name == "hf_space_deploy":
         cmd_args.append(arguments["space_name"])
@@ -921,6 +1274,43 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             cmd_args.extend(["--hardware", arguments["hardware"]])
         if "sdk" in arguments:
             cmd_args.extend(["--sdk", arguments["sdk"]])
+    
+    elif tool_name == "terraform_status":
+        config_dir = arguments["config_dir"]
+        show_outputs = arguments.get("show_outputs", True)
+        
+        # Fast status query using Terraform state
+        output_result = await execute_terraform_command(["terraform", "output", "-json"], config_dir)
+        
+        if output_result["success"] and show_outputs:
+            try:
+                outputs = json.loads(output_result["stdout"])
+                output_text = f"✅ Terraform Status (from state):\n\n"
+                
+                for key, value in outputs.items():
+                    if isinstance(value, dict) and "value" in value:
+                        output_text += f"**{key}:** {value['value']}\n"
+                
+                # Also show state summary
+                state_result = await execute_terraform_command(["terraform", "show", "-json"], config_dir)
+                if state_result["success"]:
+                    state_data = json.loads(state_result["stdout"])
+                    resource_count = len(state_data.get("values", {}).get("root_module", {}).get("resources", []))
+                    output_text += f"\n**Resources Managed:** {resource_count}\n"
+                    output_text += f"**State File:** Terraform managed\n"
+                
+                return CallToolResult(
+                    content=[TextContent(type="text", text=output_text)]
+                )
+            except json.JSONDecodeError:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"✅ Terraform Status:\n\n{output_result['stdout']}")]
+                )
+        else:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"❌ Terraform status query failed: {output_result['stderr']}")],
+                isError=True
+            )
     
     elif tool_name == "status":
         if arguments.get("live"):

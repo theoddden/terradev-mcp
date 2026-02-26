@@ -1,13 +1,15 @@
-# Terradev MCP Server v1.1.0
+# Terradev MCP Server v1.2.1
 
 GPU Cloud Provisioning for Claude Code - **Terraform-powered parallel GPU provisioning** across 11+ cloud providers.
 
-## 🚀 What's New in v1.1.0
+## 🚀 What's New in v1.2.1
 
-- **Terraform Core Engine**: All GPU provisioning now uses Terraform for optimal parallel efficiency
-- **Infrastructure as Code**: State management and reproducible deployments
-- **Bug Fixes Applied**: Fixed proxy settings, dependency issues, and API compatibility
-- **Enhanced Tools**: Added terraform_plan, terraform_apply, terraform_destroy for full IaC control
+- **MoE Cluster Templates**: Production-ready infrastructure for Mixture-of-Experts models (GLM-5, Qwen 3.5, Mistral Large 3, DeepSeek V4, Llama 5)
+- **NVLink Topology Enforcement**: Automatic single-node TP with NUMA-aligned GPU placement
+- **FP8 + vLLM/SGLang**: Both serving backends with speculative decoding support
+- **GPU-Aware Autoscaling**: HPA on DCGM metrics and inference queue depth
+- **Terraform Core Engine**: All GPU provisioning uses Terraform for optimal parallel efficiency
+- **Bug Fixes Applied**: All known issues resolved in v1.2.0+
 
 ## Architecture
 

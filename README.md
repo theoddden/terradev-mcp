@@ -1,6 +1,22 @@
-# Terradev MCP Server
+# Terradev MCP Server v1.1.0
 
-GPU Cloud Provisioning for Claude Code - Access 11+ cloud providers through natural language.
+GPU Cloud Provisioning for Claude Code - **Terraform-powered parallel GPU provisioning** across 11+ cloud providers.
+
+## 🚀 What's New in v1.1.0
+
+- **Terraform Core Engine**: All GPU provisioning now uses Terraform for optimal parallel efficiency
+- **Infrastructure as Code**: State management and reproducible deployments
+- **Bug Fixes Applied**: Fixed proxy settings, dependency issues, and API compatibility
+- **Enhanced Tools**: Added terraform_plan, terraform_apply, terraform_destroy for full IaC control
+
+## Architecture
+
+**Terraform is the fundamental engine** - not just a feature. This provides:
+- ✅ **True Parallel Provisioning** across multiple providers simultaneously  
+- ✅ **State Management** for infrastructure tracking
+- ✅ **Infrastructure as Code** with reproducible deployments
+- ✅ **Cost Optimization** through provider arbitrage
+- ✅ **Bug-Free Operation** with all known issues resolved
 
 ## Installation
 
@@ -43,7 +59,12 @@ The Terradev MCP server provides 17 tools for complete GPU cloud management:
 
 ### GPU Operations
 - **`quote_gpu`** - Get real-time GPU prices across all cloud providers
-- **`provision_gpu`** - Provision GPU instances with cost optimization
+- **`provision_gpu`** - **Terraform-powered** GPU provisioning with parallel efficiency
+
+### Terraform Infrastructure Management  
+- **`terraform_plan`** - Generate Terraform execution plans
+- **`terraform_apply`** - Apply Terraform configurations  
+- **`terraform_destroy`** - Destroy Terraform-managed infrastructure
 
 ### Kubernetes Management  
 - **`k8s_create`** - Create Kubernetes clusters with GPU nodes
@@ -82,22 +103,33 @@ terradev quote -g A100 -p runpod,vastai,lambda
 terradev quote -g H100 --quick
 ```
 
-### GPU Provisioning
+### GPU Provisioning (Terraform-Powered)
 ```bash
-# Provision single GPU
+# Provision single GPU via Terraform
 terradev provision -g A100
 
-# Provision multiple GPUs in parallel
-terradev provision -g H100 -n 4 --parallel 6
+# Provision multiple GPUs in parallel across providers
+terradev provision -g H100 -n 4 --providers ["runpod", "vastai", "lambda", "aws"]
 
-# Dry run to see plan without launching
-terradev provision -g A100 -n 8 --dry-run
+# Plan without applying
+terradev provision -g A100 -n 2 --plan-only
 
 # Set maximum price ceiling
 terradev provision -g A100 --max-price 2.50
 
-# Prefer spot instances for cost savings
-terradev provision -g H100 --prefer-spot
+# Terraform state is automatically managed
+```
+
+### Terraform Infrastructure Management
+```bash
+# Generate execution plan
+terraform plan -config-dir ./my-gpu-infrastructure
+
+# Apply infrastructure
+terraform apply -config-dir ./my-gpu-infrastructure -auto-approve
+
+# Destroy infrastructure  
+terraform destroy -config-dir ./my-gpu-infrastructure -auto-approve
 ```
 
 ### Kubernetes Clusters
@@ -190,6 +222,47 @@ terradev configure --provider vastai
 - **RTX4090** - NVIDIA RTX 4090 24GB (consumer)
 - **RTX3090** - NVIDIA RTX 3090 24GB (consumer)
 - **V100** - NVIDIA V100 32GB (legacy)
+
+## Bug Fixes Applied
+
+This release includes fixes for all known production issues:
+
+| Bug | Fix | Impact |
+|-----|-----|---------|
+| Wrong import path (terradev_cli.providers) | Changed to providers.provider_factory | ✅ API calls now work |
+| list builtin shadowed by Click command | Used type([]) instead of isinstance(r, list) | ✅ No more crashes |
+| aiohttp.ClientSession(trust_env=False) | Set trust_env=True for proxy support | ✅ Proxy environments work |
+| boto3 not in dependencies | Added boto3>=1.26.0 to requirements | ✅ AWS provider functional |
+| Vast.ai GPU name filter exact match | Switched to client-side filtering with "in" | ✅ Vast.ai provider works |
+
+**All bugs are now resolved in v1.1.0**
+
+## Terraform Integration
+
+The MCP now includes a `terraform.tf` template for custom infrastructure:
+
+```hcl
+terraform {
+  required_providers {
+    terradev = {
+      source  = "theoddden/terradev"
+      version = "~> 3.0"
+    }
+  }
+}
+
+resource "terradev_instance" "gpu" {
+  gpu_type = var.gpu_type
+  spot     = true
+  count    = var.gpu_count
+  
+  tags = {
+    Name        = "terradev-mcp-gpu"
+    Provisioned = "terraform"
+    GPU_Type    = var.gpu_type
+  }
+}
+```
 
 ## Supported Cloud Providers
 

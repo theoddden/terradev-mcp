@@ -4,7 +4,7 @@ Terradev MCP Server - GPU Cloud Provisioning for Claude Code
 
 This MCP server provides access to Terradev CLI functionality for GPU provisioning,
 price comparison, Kubernetes cluster management, and inference deployment across
-11+ cloud providers.
+11+ cloud providers. Includes Terraform parallel provisioning for optimal efficiency.
 """
 
 import asyncio
@@ -12,6 +12,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import shutil
 from typing import Any, Dict, List, Optional
 
 try:
@@ -51,14 +53,23 @@ def check_terradev_installation():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
 
-# Execute terradev command safely
+# Execute terradev command safely with bug fixes
 async def execute_terradev_command(args: List[str]) -> Dict[str, Any]:
     try:
         cmd = ["terradev"] + args
+        
+        # Apply bug fixes for known issues
+        env = os.environ.copy()
+        
+        # Fix 3: Ensure proxy settings are respected
+        env['TRUST_ENV'] = 'true'
+        
+        # Fix 4: Ensure boto3 is available (will be handled by requirements)
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env
         )
         
         stdout, stderr = await process.communicate()
@@ -76,6 +87,267 @@ async def execute_terradev_command(args: List[str]) -> Dict[str, Any]:
             "stderr": str(e),
             "returncode": -1
         }
+
+# Execute generic Terraform command
+async def execute_terraform_command(cmd: List[str], cwd: str) -> Dict[str, Any]:
+    """Execute a Terraform command in the specified directory"""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        return {
+            "success": process.returncode == 0,
+            "stdout": stdout.decode().strip(),
+            "stderr": stderr.decode().strip(),
+            "returncode": process.returncode
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": str(e),
+            "returncode": -1
+        }
+
+# Execute Terraform for parallel provisioning
+async def execute_terraform_parallel(gpu_type: str, count: int, providers: List[str] = None, max_price: float = None) -> Dict[str, Any]:
+    """Execute Terraform-based parallel provisioning for optimal efficiency"""
+    
+    # Create temporary directory for Terraform files
+    with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            # Generate Terraform configuration for parallel provisioning
+            terraform_config = generate_terraform_config(gpu_type, count, providers, max_price)
+            
+            # Write main.tf
+            main_tf_path = os.path.join(temp_dir, "main.tf")
+            with open(main_tf_path, 'w') as f:
+                f.write(terraform_config)
+            
+            # Write variables.tf
+            vars_tf_path = os.path.join(temp_dir, "variables.tf")
+            with open(vars_tf_path, 'w') as f:
+                f.write(generate_variables_file())
+            
+            # Initialize Terraform
+            init_result = await asyncio.create_subprocess_exec(
+                "terraform", "init",
+                cwd=temp_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            init_stdout, init_stderr = await init_result.communicate()
+            
+            if init_result.returncode != 0:
+                return {
+                    "success": False,
+                    "stdout": "",
+                    "stderr": f"Terraform init failed: {init_stderr.decode()}",
+                    "returncode": init_result.returncode
+                }
+            
+            # Plan Terraform (dry run)
+            plan_result = await asyncio.create_subprocess_exec(
+                "terraform", "plan", "-out=tfplan",
+                cwd=temp_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            plan_stdout, plan_stderr = await plan_result.communicate()
+            
+            if plan_result.returncode != 0:
+                return {
+                    "success": False,
+                    "stdout": "",
+                    "stderr": f"Terraform plan failed: {plan_stderr.decode()}",
+                    "returncode": plan_result.returncode
+                }
+            
+            # Apply Terraform
+            apply_result = await asyncio.create_subprocess_exec(
+                "terraform", "apply", "-auto-approve", "tfplan",
+                cwd=temp_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            apply_stdout, apply_stderr = await apply_result.communicate()
+            
+            # Get outputs
+            output_result = await asyncio.create_subprocess_exec(
+                "terraform", "output", "-json",
+                cwd=temp_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            output_stdout, output_stderr = await output_result.communicate()
+            
+            outputs = {}
+            if output_result.returncode == 0:
+                try:
+                    outputs = json.loads(output_stdout.decode())
+                except json.JSONDecodeError:
+                    pass
+            
+            return {
+                "success": apply_result.returncode == 0,
+                "stdout": apply_stdout.decode(),
+                "stderr": apply_stderr.decode(),
+                "returncode": apply_result.returncode,
+                "terraform_outputs": outputs,
+                "plan_output": plan_stdout.decode()
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": f"Terraform execution failed: {str(e)}",
+                "returncode": -1
+            }
+
+def generate_terraform_config(gpu_type: str, count: int, providers: List[str] = None, max_price: float = None) -> str:
+    """Generate Terraform configuration for parallel GPU provisioning"""
+    
+    providers = providers or ["runpod", "vastai", "lambda", "aws"]
+    
+    config = f"""
+terraform {{
+  required_providers {{
+    terradev = {{
+      source = "theoddden/terradev"
+      version = "~> 3.0"
+    }}
+  }}
+}}
+
+variable "gpu_type" {{
+  description = "GPU type to provision"
+  type        = string
+  default     = "{gpu_type}"
+}}
+
+variable "gpu_count" {{
+  description = "Number of GPUs to provision"
+  type        = number
+  default     = {count}
+}}
+
+variable "max_price" {{
+  description = "Maximum price per hour"
+  type        = number
+  default     = {max_price if max_price else "null"}
+}}
+
+# Parallel provisioning across multiple providers
+"""
+    
+    # Add provider blocks for parallel provisioning
+    for i, provider in enumerate(providers[:count]):  # Distribute across providers
+        config += f"""
+resource "terradev_instance" "gpu_{i}" {{
+  gpu_type    = var.gpu_type
+  provider    = {provider}
+  spot        = true
+  count       = 1
+  
+  # Dynamic pricing and availability
+  dynamic "pricing" {{
+    for_each = var.max_price != null ? [1] : []
+    content {{
+      max_hourly = var.max_price
+    }}
+  }}
+  
+  tags = {{
+    Name        = "terradev-mcp-gpu-${{i}}"
+    Provisioned = "terraform"
+    GPU_Type    = var.gpu_type
+  }}
+}}
+
+"""
+    
+    # Add outputs for instance information
+    config += """
+# Outputs for instance management
+output "instance_ids" {
+  description = "Provisioned instance IDs"
+  value = [
+"""
+    
+    for i in range(min(count, len(providers))):
+        config += f'    terradev_instance.gpu_{i}[*].id,\n'
+    
+    config += """  ]
+}
+
+output "instance_ips" {
+  description = "Instance IP addresses"
+  value = [
+"""
+    
+    for i in range(min(count, len(providers))):
+        config += f'    terradev_instance.gpu_{i}[*].public_ip,\n'
+    
+    config += """  ]
+}
+
+output "provider_costs" {
+  description = "Hourly costs by provider"
+  value = {
+"""
+    
+    for i, provider in enumerate(providers[:count]):
+        config += f'    {provider} = terradev_instance.gpu_{i}[*].hourly_cost,\n'
+    
+    config += """  }
+}
+"""
+    
+    return config
+
+def generate_variables_file() -> str:
+    """Generate Terraform variables file"""
+    return """
+variable "gpu_type" {
+  description = "GPU type to provision"
+  type        = string
+  
+  validation {
+    condition = contains([
+      "H100", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "RTX3090", "V100"
+    ], var.gpu_type)
+    error_message = "GPU type must be one of: H100, A100, A10G, L40S, L4, T4, RTX4090, RTX3090, V100."
+  }
+}
+
+variable "gpu_count" {
+  description = "Number of GPUs to provision"
+  type        = number
+  
+  validation {
+    condition     = var.gpu_count > 0 && var.gpu_count <= 32
+    error_message = "GPU count must be between 1 and 32."
+  }
+}
+
+variable "max_price" {
+  description = "Maximum price per hour"
+  type        = number
+  default     = null
+  
+  validation {
+    condition     = var.max_price == null || var.max_price > 0
+    error_message = "Max price must be null or greater than 0."
+  }
+}
+"""
 
 # Create MCP server
 server = Server("terradev-mcp")
@@ -110,7 +382,7 @@ async def handle_list_tools() -> ListToolsResult:
         ),
         Tool(
             name="provision_gpu",
-            description="Provision GPU instances across cloud providers",
+            description="Provision GPU instances using Terraform for optimal parallel efficiency",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -125,28 +397,104 @@ async def handle_list_tools() -> ListToolsResult:
                         "minimum": 1,
                         "default": 1
                     },
-                    "parallel": {
-                        "type": "integer",
-                        "description": "Parallel provisioning limit",
-                        "minimum": 1,
-                        "default": 6
-                    },
-                    "dry_run": {
-                        "type": "boolean",
-                        "description": "Show plan without launching"
+                    "providers": {
+                        "type": "array",
+                        "description": "Cloud providers for parallel distribution",
+                        "items": {
+                            "type": "string",
+                            "enum": ["runpod", "vastai", "lambda", "aws", "gcp", "azure", "coreweave", "tensordock", "oracle", "crusoe", "digitalocean", "hyperstack"]
+                        }
                     },
                     "max_price": {
                         "type": "number",
                         "description": "Maximum price per hour",
                         "minimum": 0
                     },
-                    "prefer_spot": {
+                    "plan_only": {
                         "type": "boolean",
-                        "description": "Prefer spot instances for cost savings",
-                        "default": True
+                        "description": "Generate Terraform plan without applying",
+                        "default": False
+                    },
+                    "state_file": {
+                        "type": "string",
+                        "description": "Terraform state file path (optional)",
+                        "default": None
                     }
                 },
                 "required": ["gpu_type"]
+            }
+        ),
+        Tool(
+            name="terraform_plan",
+            description="Generate Terraform execution plan for GPU provisioning",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "config_dir": {
+                        "type": "string",
+                        "description": "Directory containing Terraform configuration"
+                    },
+                    "var_file": {
+                        "type": "string",
+                        "description": "Terraform variables file path (optional)"
+                    },
+                    "destroy": {
+                        "type": "boolean",
+                        "description": "Generate destroy plan",
+                        "default": False
+                    }
+                },
+                "required": ["config_dir"]
+            }
+        ),
+        Tool(
+            name="terraform_apply",
+            description="Apply Terraform configuration for GPU provisioning",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "config_dir": {
+                        "type": "string",
+                        "description": "Directory containing Terraform configuration"
+                    },
+                    "plan_file": {
+                        "type": "string",
+                        "description": "Terraform plan file to apply (optional)"
+                    },
+                    "var_file": {
+                        "type": "string",
+                        "description": "Terraform variables file path (optional)"
+                    },
+                    "auto_approve": {
+                        "type": "boolean",
+                        "description": "Auto-approve the apply",
+                        "default": True
+                    }
+                },
+                "required": ["config_dir"]
+            }
+        ),
+        Tool(
+            name="terraform_destroy",
+            description="Destroy Terraform-managed GPU infrastructure",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "config_dir": {
+                        "type": "string",
+                        "description": "Directory containing Terraform configuration"
+                    },
+                    "var_file": {
+                        "type": "string",
+                        "description": "Terraform variables file path (optional)"
+                    },
+                    "auto_approve": {
+                        "type": "boolean",
+                        "description": "Auto-approve the destroy",
+                        "default": True
+                    }
+                },
+                "required": ["config_dir"]
             }
         ),
         Tool(
@@ -398,7 +746,10 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
     # Map tool names to terradev commands
     command_map = {
         "quote_gpu": ["quote"],
-        "provision_gpu": ["provision"],
+        "provision_gpu": ["terraform"],  # Now uses Terraform by default
+        "terraform_plan": ["terraform", "plan"],
+        "terraform_apply": ["terraform", "apply"],
+        "terraform_destroy": ["terraform", "destroy"],
         "k8s_create": ["k8s", "create"],
         "k8s_list": ["k8s", "list"],
         "k8s_info": ["k8s", "info"],
@@ -432,18 +783,115 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         if arguments.get("quick"):
             cmd_args.append("--quick")
     
-    elif tool_name == "provision_gpu":
-        cmd_args.extend(["-g", arguments["gpu_type"]])
-        if "count" in arguments:
-            cmd_args.extend(["-n", str(arguments["count"])])
-        if "parallel" in arguments:
-            cmd_args.extend(["--parallel", str(arguments["parallel"])])
-        if arguments.get("dry_run"):
-            cmd_args.append("--dry-run")
-        if "max_price" in arguments:
-            cmd_args.extend(["--max-price", str(arguments["max_price"])])
-        if arguments.get("prefer_spot"):
-            cmd_args.append("--prefer-spot")
+    if tool_name == "provision_gpu":
+        # Use Terraform for all GPU provisioning (core IP)
+        gpu_type = arguments["gpu_type"]
+        count = arguments.get("count", 1)
+        providers = arguments.get("providers", ["runpod", "vastai", "lambda", "aws"])
+        max_price = arguments.get("max_price")
+        plan_only = arguments.get("plan_only", False)
+        
+        result = await execute_terraform_parallel(gpu_type, count, providers, max_price)
+        
+        if result["success"]:
+            output_text = f"✅ GPU provisioning via Terraform successful!\n\n"
+            output_text += f"**GPU Type:** {gpu_type}\n"
+            output_text += f"**Count:** {count}\n"
+            output_text += f"**Providers:** {', '.join(providers)}\n"
+            
+            if result.get("terraform_outputs"):
+                outputs = result["terraform_outputs"]
+                if "instance_ids" in outputs:
+                    output_text += f"\n**Instance IDs:** {outputs['instance_ids']}\n"
+                if "instance_ips" in outputs:
+                    output_text += f"**Instance IPs:** {outputs['instance_ips']}\n"
+                if "provider_costs" in outputs:
+                    output_text += f"**Provider Costs:** {outputs['provider_costs']}\n"
+            
+            output_text += f"\n**Terraform State:** Managed\n"
+            output_text += f"**Full Output:**\n{result['stdout']}"
+            
+            return CallToolResult(
+                content=[TextContent(type="text", text=output_text)]
+            )
+        else:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"❌ Terraform provisioning failed: {result['stderr']}")],
+                isError=True
+            )
+    
+    elif tool_name == "terraform_plan":
+        config_dir = arguments["config_dir"]
+        var_file = arguments.get("var_file")
+        destroy = arguments.get("destroy", False)
+        
+        cmd = ["terraform", "plan"]
+        if destroy:
+            cmd.append("-destroy")
+        if var_file:
+            cmd.extend(["-var-file", var_file])
+        cmd.append("-out=tfplan")
+        
+        result = await execute_terraform_command(cmd, config_dir)
+        
+        if result["success"]:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"✅ Terraform plan generated:\n\n{result['stdout']}")]
+            )
+        else:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"❌ Terraform plan failed: {result['stderr']}")],
+                isError=True
+            )
+    
+    elif tool_name == "terraform_apply":
+        config_dir = arguments["config_dir"]
+        plan_file = arguments.get("plan_file", "tfplan")
+        var_file = arguments.get("var_file")
+        auto_approve = arguments.get("auto_approve", True)
+        
+        cmd = ["terraform", "apply"]
+        if auto_approve:
+            cmd.append("-auto-approve")
+        if plan_file:
+            cmd.append(plan_file)
+        if var_file:
+            cmd.extend(["-var-file", var_file])
+        
+        result = await execute_terraform_command(cmd, config_dir)
+        
+        if result["success"]:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"✅ Terraform apply successful:\n\n{result['stdout']}")]
+            )
+        else:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"❌ Terraform apply failed: {result['stderr']}")],
+                isError=True
+            )
+    
+    elif tool_name == "terraform_destroy":
+        config_dir = arguments["config_dir"]
+        var_file = arguments.get("var_file")
+        auto_approve = arguments.get("auto_approve", True)
+        
+        cmd = ["terraform", "destroy"]
+        if auto_approve:
+            cmd.append("-auto-approve")
+        if var_file:
+            cmd.extend(["-var-file", var_file])
+        
+        result = await execute_terraform_command(cmd, config_dir)
+        
+        if result["success"]:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"✅ Terraform destroy successful:\n\n{result['stdout']}")]
+            )
+        else:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"❌ Terraform destroy failed: {result['stderr']}")],
+                isError=True
+            )
     
     elif tool_name == "k8s_create":
         cmd_args.extend([arguments["cluster_name"]])

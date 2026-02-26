@@ -235,7 +235,7 @@ This release includes fixes for all known production issues:
 | boto3 not in dependencies | Added boto3>=1.26.0 to requirements | ✅ AWS provider functional |
 | Vast.ai GPU name filter exact match | Switched to client-side filtering with "in" | ✅ Vast.ai provider works |
 
-**All bugs are now resolved in v1.1.0**
+**All bugs are now resolved in v1.2.0**
 
 ## Terraform Integration
 

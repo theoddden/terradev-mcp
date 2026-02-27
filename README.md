@@ -1,8 +1,8 @@
-# Terradev MCP Server v1.2.2
+# Terradev MCP Server v1.2.3
 
 GPU Cloud Provisioning for Claude Code - **Terraform-powered parallel GPU provisioning** across 11+ cloud providers.
 
-## 🚀 What's New in v1.2.2
+## 🚀 What's New in v1.2.3
 
 - **🏠 Local GPU Discovery**: Scan your local machines for available GPUs (Mac Mini M4 + RTX 4090 = 48GB pool!)
 - **🔀 Hybrid Local/Cloud Orchestration**: Local-first provisioning with automatic cloud overflow
@@ -98,7 +98,7 @@ See `nginx-mcp.conf` for reverse proxy configuration with SSL.
 The Terradev MCP server provides 17 tools for complete GPU cloud management:
 
 ### GPU Operations
-- **`local_scan`** - Discover local GPU devices and total VRAM pool (NEW in v1.2.2!)
+- **`local_scan`** - Discover local GPU devices and total VRAM pool (NEW in v1.2.2)
 - **`quote_gpu`** - Get real-time GPU prices across all cloud providers
 - **`provision_gpu`** - **Terraform-powered** GPU provisioning with parallel efficiency
 

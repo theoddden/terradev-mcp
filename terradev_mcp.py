@@ -1838,7 +1838,7 @@ def create_sse_app() -> "Starlette":
         )
 
     async def health(request: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok", "server": "terradev-mcp", "version": "1.2.2"})
+        return JSONResponse({"status": "ok", "server": "terradev-mcp", "version": "1.2.3"})
 
     # SSE handler wraps the MCP server
     class SseHandler:
@@ -1864,7 +1864,7 @@ def create_sse_app() -> "Starlette":
                     streams[1],
                     InitializationOptions(
                         server_name="terradev-mcp",
-                        server_version="1.2.2",
+                        server_version="1.2.3",
                         capabilities=self._server.get_capabilities(
                             notification_options=NotificationOptions(),
                             experimental_capabilities=None,
@@ -1907,7 +1907,7 @@ async def run_stdio():
             write_stream,
             InitializationOptions(
                 server_name="terradev-mcp",
-                server_version="1.2.2",
+                server_version="1.2.3",
                 capabilities=server.get_capabilities(
                     notification_options=None,
                     experimental_capabilities=None,

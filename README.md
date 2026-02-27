@@ -1,15 +1,16 @@
-# Terradev MCP Server v1.2.1
+# Terradev MCP Server v1.2.2
 
 GPU Cloud Provisioning for Claude Code - **Terraform-powered parallel GPU provisioning** across 11+ cloud providers.
 
-## 🚀 What's New in v1.2.1
+## 🚀 What's New in v1.2.2
 
-- **MoE Cluster Templates**: Production-ready infrastructure for Mixture-of-Experts models (GLM-5, Qwen 3.5, Mistral Large 3, DeepSeek V4, Llama 5)
+- **🏠 Local GPU Discovery**: Scan your local machines for available GPUs (Mac Mini M4 + RTX 4090 = 48GB pool!)
+- **🔀 Hybrid Local/Cloud Orchestration**: Local-first provisioning with automatic cloud overflow
+- **💬 Helpful Error Messages**: Clear guidance when API keys are missing or dependencies aren't installed
+- **🔌 Claude.ai Connector**: Fully working OAuth 2.0 PKCE flow for remote access
+- **MoE Cluster Templates**: Production-ready infrastructure for Mixture-of-Experts models
 - **NVLink Topology Enforcement**: Automatic single-node TP with NUMA-aligned GPU placement
-- **FP8 + vLLM/SGLang**: Both serving backends with speculative decoding support
-- **GPU-Aware Autoscaling**: HPA on DCGM metrics and inference queue depth
 - **Terraform Core Engine**: All GPU provisioning uses Terraform for optimal parallel efficiency
-- **Bug Fixes Applied**: All known issues resolved in v1.2.0+
 
 ## Architecture
 
@@ -41,7 +42,7 @@ export TERRADEV_RUNPOD_KEY=your_runpod_api_key
 npm install -g terradev-mcp
 ```
 
-### Claude Code Setup
+### Claude Code Setup (Local — stdio)
 
 Add to your Claude Code MCP configuration:
 
@@ -55,11 +56,49 @@ Add to your Claude Code MCP configuration:
 }
 ```
 
+### Claude.ai Connector Setup (Remote — SSE)
+
+Use Terradev from **Claude.ai on any device** — no local install required.
+
+1. Go to **Claude.ai → Settings → Connectors**
+2. Add a new connector with URL:
+   ```
+   https://terradev-mcp.terradev.cloud/sse
+   ```
+3. Enter the Bearer token provided by your admin.
+
+That's it — GPU provisioning tools are now available in every Claude.ai conversation.
+
+#### Self-Hosting the Remote Server
+
+To host your own instance:
+
+```bash
+# Set required env vars
+export TERRADEV_MCP_BEARER_TOKEN=your-secret-token
+export TERRADEV_RUNPOD_KEY=your-runpod-key
+
+# Option 1: Run directly
+pip install -r requirements.txt
+python3 terradev_mcp.py --transport sse --port 8080
+
+# Option 2: Docker
+docker-compose up -d
+```
+
+The server exposes:
+- `GET /sse` — SSE stream endpoint (Claude.ai connects here)
+- `POST /messages` — MCP message endpoint
+- `GET /health` — Health check (unauthenticated)
+
+See `nginx-mcp.conf` for reverse proxy configuration with SSL.
+
 ## Available MCP Tools
 
 The Terradev MCP server provides 17 tools for complete GPU cloud management:
 
 ### GPU Operations
+- **`local_scan`** - Discover local GPU devices and total VRAM pool (NEW in v1.2.2!)
 - **`quote_gpu`** - Get real-time GPU prices across all cloud providers
 - **`provision_gpu`** - **Terraform-powered** GPU provisioning with parallel efficiency
 
@@ -92,6 +131,29 @@ The Terradev MCP server provides 17 tools for complete GPU cloud management:
 - **`configure_provider`** - Configure provider credentials locally
 
 ## Complete Command Reference
+
+### Local GPU Discovery (NEW!)
+```bash
+# Scan for local GPUs
+terradev local scan
+
+# Example output:
+# ✅ Found 2 local GPU(s)
+# 📊 Total VRAM Pool: 48 GB
+#
+# Devices:
+# • NVIDIA GeForce RTX 4090
+#   - Type: CUDA
+#   - VRAM: 24 GB
+#   - Compute: 8.9
+#
+# • Apple Metal
+#   - Type: MPS
+#   - VRAM: 24 GB
+#   - Platform: arm64
+```
+
+**Hybrid Use Case**: Mac Mini (24GB) + Gaming PC with RTX 4090 (24GB) = 48GB local pool for Qwen2.5-72B!
 
 ### GPU Price Quotes
 ```bash
@@ -275,12 +337,26 @@ RunPod, Vast.ai, AWS, GCP, Azure, Lambda Labs, CoreWeave, TensorDock, Oracle Clo
 Minimum setup:
 - `TERRADEV_RUNPOD_KEY`: RunPod API key
 
+Remote SSE mode:
+- `TERRADEV_MCP_BEARER_TOKEN`: Bearer token for authenticating Claude.ai Connector requests (required in production)
+
 Full multi-cloud setup:
 - `TERRADEV_AWS_ACCESS_KEY_ID`, `TERRADEV_AWS_SECRET_ACCESS_KEY`, `TERRADEV_AWS_DEFAULT_REGION`
 - `TERRADEV_GCP_PROJECT_ID`, `TERRADEV_GCP_CREDENTIALS_PATH`
 - `TERRADEV_AZURE_SUBSCRIPTION_ID`, `TERRADEV_AZURE_CLIENT_ID`, `TERRADEV_AZURE_CLIENT_SECRET`, `TERRADEV_AZURE_TENANT_ID`
 - Additional provider keys (VastAI, Oracle, Lambda, CoreWeave, Crusoe, TensorDock)
 - `HF_TOKEN`: For HuggingFace Spaces deployment
+
+## Pricing Tiers
+
+| Tier | Price | Instances | Seats |
+|------|-------|-----------|-------|
+| **Research** (Free) | $0 | 1 | 1 |
+| **Research+** | $49.99/mo | 8 | 1 |
+| **Enterprise** | $299.99/mo | 32 | 5 |
+| **Enterprise+** | $0.09/GPU-hr (32 GPU min) | Unlimited | Unlimited |
+
+> **Enterprise+**: Metered billing at **$0.09 per GPU-hour** with a minimum of 32 GPUs. Unlimited provisions, servers, seats, dedicated support, fleet management, and GPU-hour metering. Run `terradev upgrade -t enterprise_plus`.
 
 ## Security
 

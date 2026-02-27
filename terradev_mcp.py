@@ -7,19 +7,29 @@ price comparison, Kubernetes cluster management, and inference deployment across
 11+ cloud providers. Includes Terraform parallel provisioning for optimal efficiency.
 """
 
+import argparse
 import asyncio
+import base64
+import hashlib
 import json
+import logging
 import os
+import secrets
 import subprocess
 import sys
 import tempfile
+import time
 import shutil
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode, parse_qs, urlparse
 
 try:
     from mcp.server import Server
     from mcp.server.models import InitializationOptions
     from mcp.server.stdio import stdio_server
+    from mcp.server.sse import SseServerTransport
+    from mcp.server import NotificationOptions
+    from mcp.server.sse import TransportSecuritySettings
     from mcp.types import (
         CallToolRequest,
         CallToolResult,
@@ -37,8 +47,22 @@ try:
         Tool,
     )
 except ImportError:
-    print("Error: mcp package not found. Please install it with: pip install mcp", file=sys.stderr)
+    print("Error: mcp package not found. Please install it with: pip install 'mcp[cli]'", file=sys.stderr)
     sys.exit(1)
+
+try:
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse, Response
+    from starlette.routing import Mount, Route
+    import uvicorn
+except ImportError:
+    # SSE deps are optional — only needed for remote mode
+    Starlette = None
+    uvicorn = None
+
+logger = logging.getLogger("terradev-mcp")
 
 # Check if terradev CLI is available
 def check_terradev_installation():
@@ -53,8 +77,121 @@ def check_terradev_installation():
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
 
+# Local GPU Discovery
+async def discover_local_gpus() -> Dict[str, Any]:
+    """Discover local GPU devices on the network and current machine.
+    
+    Returns a dict with:
+    - local_devices: List of GPUs on current machine
+    - total_vram: Total VRAM available locally
+    - device_details: Detailed info per device
+    """
+    devices = []
+    total_vram = 0
+    
+    try:
+        # Try to import torch for CUDA detection
+        import torch
+        
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                props = torch.cuda.get_device_properties(i)
+                device_info = {
+                    'id': i,
+                    'type': 'cuda',
+                    'name': torch.cuda.get_device_name(i),
+                    'vram_gb': round(props.total_memory / (1024**3), 2),
+                    'compute_capability': f"{props.major}.{props.minor}",
+                    'multi_processor_count': props.multi_processor_count
+                }
+                devices.append(device_info)
+                total_vram += device_info['vram_gb']
+        
+        # Check for Apple Metal/MPS
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            # Estimate unified memory (simplified - actual detection is complex)
+            import platform
+            if platform.system() == 'Darwin':
+                # Try to get system memory as proxy for unified memory
+                try:
+                    import psutil
+                    total_mem_gb = round(psutil.virtual_memory().total / (1024**3), 2)
+                    device_info = {
+                        'id': len(devices),
+                        'type': 'mps',
+                        'name': 'Apple Metal',
+                        'vram_gb': total_mem_gb,  # Unified memory
+                        'platform': platform.machine()
+                    }
+                    devices.append(device_info)
+                    total_vram += device_info['vram_gb']
+                except ImportError:
+                    pass
+    
+    except ImportError:
+        # torch not available, try nvidia-smi
+        try:
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=index,name,memory.total', '--format=csv,noheader,nounits'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if line:
+                        parts = line.split(', ')
+                        if len(parts) >= 3:
+                            device_info = {
+                                'id': int(parts[0]),
+                                'type': 'cuda',
+                                'name': parts[1],
+                                'vram_gb': round(float(parts[2]) / 1024, 2)
+                            }
+                            devices.append(device_info)
+                            total_vram += device_info['vram_gb']
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+    
+    return {
+        'local_devices': devices,
+        'total_vram_gb': round(total_vram, 2),
+        'device_count': len(devices),
+        'has_local_gpu': len(devices) > 0
+    }
+
+async def estimate_model_memory(model_name: str) -> float:
+    """Estimate memory requirements for a model.
+    
+    Simple heuristic based on model size in name (e.g., '72B' -> 72 billion params).
+    Returns estimated VRAM in GB.
+    """
+    import re
+    
+    # Extract parameter count from model name
+    match = re.search(r'(\d+)B', model_name, re.IGNORECASE)
+    if match:
+        params_b = int(match.group(1))
+        # Rough estimate: 2 bytes per param (fp16) + 20% overhead
+        return params_b * 2 * 1.2
+    
+    # Default estimates for common models
+    model_lower = model_name.lower()
+    if '7b' in model_lower:
+        return 16
+    elif '13b' in model_lower:
+        return 28
+    elif '70b' in model_lower or '72b' in model_lower:
+        return 150
+    elif '405b' in model_lower:
+        return 850
+    
+    # Unknown model, return conservative estimate
+    return 20
+
 # Execute terradev command safely with bug fixes
 async def execute_terradev_command(args: List[str]) -> Dict[str, Any]:
+    """Execute terradev CLI command with helpful error messages."""
     try:
         cmd = ["terradev"] + args
         
@@ -73,20 +210,75 @@ async def execute_terradev_command(args: List[str]) -> Dict[str, Any]:
         )
         
         stdout, stderr = await process.communicate()
+        stderr_text = stderr.decode().strip()
+        
+        # Enhance error messages with helpful guidance
+        if process.returncode != 0:
+            stderr_text = enhance_error_message(stderr_text, args)
         
         return {
             "success": process.returncode == 0,
             "stdout": stdout.decode().strip(),
-            "stderr": stderr.decode().strip(),
+            "stderr": stderr_text,
             "returncode": process.returncode
+        }
+    except FileNotFoundError:
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": "❌ terradev CLI not found.\n\n" +
+                     "📦 Install it with: pip install terradev-cli\n" +
+                     "📚 Docs: https://github.com/terradev-io/terradev-cli",
+            "returncode": -1
         }
     except Exception as e:
         return {
             "success": False,
             "stdout": "",
-            "stderr": str(e),
+            "stderr": f"❌ Unexpected error: {str(e)}",
             "returncode": -1
         }
+
+def enhance_error_message(stderr: str, args: List[str]) -> str:
+    """Add helpful guidance to error messages."""
+    # Check for common API key errors
+    if "TERRADEV_RUNPOD_KEY" in stderr or "RunPod" in stderr:
+        return (f"{stderr}\n\n"
+                "💡 Looks like TERRADEV_RUNPOD_KEY isn't set.\n"
+                "   Run: terradev setup runpod --quick\n"
+                "   Or set: export TERRADEV_RUNPOD_KEY=your_key_here")
+    
+    if "AWS" in stderr and "credentials" in stderr.lower():
+        return (f"{stderr}\n\n"
+                "💡 AWS credentials not configured.\n"
+                "   Run: aws configure\n"
+                "   Or: terradev setup aws --quick")
+    
+    if "GOOGLE" in stderr or "GCP" in stderr:
+        return (f"{stderr}\n\n"
+                "💡 Google Cloud credentials not found.\n"
+                "   Run: gcloud auth application-default login\n"
+                "   Or: terradev setup gcp --quick")
+    
+    if "ModuleNotFoundError" in stderr or "ImportError" in stderr:
+        # Extract module name
+        import re
+        match = re.search(r"No module named '([^']+)'", stderr)
+        if match:
+            module = match.group(1)
+            return (f"{stderr}\n\n"
+                   f"💡 Missing Python package: {module}\n"
+                   f"   Run: pip install {module}")
+    
+    if "permission denied" in stderr.lower():
+        return (f"{stderr}\n\n"
+                "💡 Permission denied. Try:\n"
+                "   • Check file permissions\n"
+                "   • Run with appropriate access rights\n"
+                "   • Verify API key has required permissions")
+    
+    # Return original error if no enhancement needed
+    return stderr
 
 # Execute generic Terraform command
 async def execute_terraform_command(cmd: List[str], cwd: str) -> Dict[str, Any]:
@@ -278,24 +470,24 @@ resource "terradev_kubernetes_cluster" "main" {{
         # Add multi-cloud node pools for enhanced resilience
         providers = ["runpod", "vastai", "lambda", "aws"]
         for i, provider in enumerate(providers[:node_count]):
-            config += f"""
-# Multi-cloud node pool - {provider}
-resource "terradev_node_pool" "pool_{i}" {{
-  cluster_name = terradev_kubernetes_cluster.main.name
-  provider     = "{provider}"
-  gpu_type     = var.gpu_type
-  node_count   = 1
-  spot         = var.prefer_spot
-  
-  depends_on = [terradev_kubernetes_cluster.main]
-  
-  tags = {{
-    Name        = "${{var.cluster_name}}-pool-{i}"
-    Provider    = "{provider}"
-    Provisioned = "terraform"
-  }}
-}}
-"""
+            config += (
+                "\n# Multi-cloud node pool - " + provider + "\n"
+                'resource "terradev_node_pool" "pool_' + str(i) + '" {\n'
+                "  cluster_name = terradev_kubernetes_cluster.main.name\n"
+                '  provider     = "' + provider + '"\n'
+                "  gpu_type     = var.gpu_type\n"
+                "  node_count   = 1\n"
+                "  spot         = var.prefer_spot\n"
+                "\n"
+                "  depends_on = [terradev_kubernetes_cluster.main]\n"
+                "\n"
+                "  tags = {\n"
+                '    Name        = "${var.cluster_name}-pool-' + str(i) + '"\n'
+                '    Provider    = "' + provider + '"\n'
+                '    Provisioned = "terraform"\n'
+                "  }\n"
+                "}\n"
+            )
 
     # Add outputs
     config += """
@@ -336,63 +528,62 @@ def generate_inference_terraform_config(model: str, gpu_type: str, endpoint_name
     
     endpoint_name = endpoint_name or f"inferx-{model.replace('/', '-').replace(':', '-')}"
     
-    config = f"""
-terraform {{
-  required_providers {{
-    terradev = {{
-      source  = "theoddden/terradev"
-      version = "~> 3.0"
-    }}
-  }}
-}}
+    config = (
+        "terraform {\n"
+        "  required_providers {\n"
+        "    terradev = {\n"
+        '      source  = "theoddden/terradev"\n'
+        '      version = "~> 3.0"\n'
+        "    }\n"
+        "  }\n"
+        "}\n\n"
+        'variable "model" {\n'
+        '  description = "Model ID for deployment"\n'
+        "  type        = string\n"
+        '  default     = "' + model + '"\n'
+        "}\n\n"
+        'variable "gpu_type" {\n'
+        '  description = "GPU type for inference"\n'
+        "  type        = string\n"
+        '  default     = "' + gpu_type + '"\n'
+        "}\n\n"
+        'variable "endpoint_name" {\n'
+        '  description = "Inference endpoint name"\n'
+        "  type        = string\n"
+        '  default     = "' + endpoint_name + '"\n'
+        "}\n\n"
+    )
 
-variable "model" {{
-  description = "Model ID for deployment"
-  type        = string
-  default     = "{model}"
-}}
-
-variable "gpu_type" {{
-  description = "GPU type for inference"
-  type        = string
-  default     = "{gpu_type}"
-}}
-
-variable "endpoint_name" {{
-  description = "Inference endpoint name"
-  type        = string
-  default     = "{endpoint_name}"
-}}
-
+    config += """
 # InferX serverless endpoint
-resource "terradev_inference_endpoint" "main" {{
+resource "terradev_inference_endpoint" "main" {
   name        = var.endpoint_name
   model       = var.model
   gpu_type    = var.gpu_type
-  
-  tags = {{
+
+  tags = {
     Name        = var.endpoint_name
     Model       = var.model
     GPU_Type    = var.gpu_type
     Provisioned = "terraform"
-  }}
-}}
+  }
+}
 
 # HuggingFace Spaces deployment (optional)
-resource "terradev_hf_space" "main" {{
+resource "terradev_hf_space" "main" {
   count       = contains(["A10G", "L4", "T4"], var.gpu_type) ? 1 : 0
   name        = var.endpoint_name
   model_id    = var.model
   hardware    = var.gpu_type
   sdk         = "gradio"
-  
-  tags = {{
+
+  tags = {
     Name        = var.endpoint_name
     Model       = var.model
     Hardware    = var.gpu_type
     Provisioned = "terraform"
-  }}
-}}
+  }
+}
 
 # Outputs
 output "endpoint_url" {
@@ -410,7 +601,7 @@ output "hf_space_url" {
   value       = length(terradev_hf_space.main) > 0 ? terradev_hf_space.main[0].url : null
 }
 """
-    
+
     return config
 
 def generate_terraform_config(gpu_type: str, count: int, providers: List[str] = None, max_price: float = None) -> str:
@@ -451,29 +642,28 @@ variable "max_price" {{
     
     # Add provider blocks for parallel provisioning
     for i, provider in enumerate(providers[:count]):  # Distribute across providers
-        config += f"""
-resource "terradev_instance" "gpu_{i}" {{
-  gpu_type    = var.gpu_type
-  provider    = {provider}
-  spot        = true
-  count       = 1
-  
-  # Dynamic pricing and availability
-  dynamic "pricing" {{
-    for_each = var.max_price != null ? [1] : []
-    content {{
-      max_hourly = var.max_price
-    }}
-  }}
-  
-  tags = {{
-    Name        = "terradev-mcp-gpu-${{i}}"
-    Provisioned = "terraform"
-    GPU_Type    = var.gpu_type
-  }}
-}}
-
-"""
+        config += (
+            '\nresource "terradev_instance" "gpu_' + str(i) + '" {\n'
+            "  gpu_type    = var.gpu_type\n"
+            '  provider    = ' + provider + '\n'
+            "  spot        = true\n"
+            "  count       = 1\n"
+            "\n"
+            "  # Dynamic pricing and availability\n"
+            '  dynamic "pricing" {\n'
+            "    for_each = var.max_price != null ? [1] : []\n"
+            "    content {\n"
+            "      max_hourly = var.max_price\n"
+            "    }\n"
+            "  }\n"
+            "\n"
+            "  tags = {\n"
+            '    Name        = "terradev-mcp-gpu-' + str(i) + '"\n'
+            '    Provisioned = "terraform"\n'
+            "    GPU_Type    = var.gpu_type\n"
+            "  }\n"
+            "}\n\n"
+        )
     
     # Add outputs for instance information
     config += """
@@ -697,6 +887,15 @@ async def handle_list_tools() -> ListToolsResult:
                     }
                 },
                 "required": ["config_dir"]
+            }
+        ),
+        Tool(
+            name="local_scan",
+            description="Scan local machine and network for available GPU devices. Returns total VRAM pool for local-first provisioning.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
             }
         ),
         Tool(
@@ -1020,6 +1219,39 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
     
     # Build command arguments
     cmd_args = command_map[tool_name].copy()
+    
+    # Handle local_scan tool separately (doesn't use terradev CLI)
+    if tool_name == "local_scan":
+        local_info = await discover_local_gpus()
+        
+        output_text = "🔍 **Local GPU Scan Results**\n\n"
+        
+        if local_info['has_local_gpu']:
+            output_text += f"✅ **Found {local_info['device_count']} local GPU(s)**\n"
+            output_text += f"📊 **Total VRAM Pool:** {local_info['total_vram_gb']} GB\n\n"
+            
+            output_text += "**Devices:**\n"
+            for device in local_info['local_devices']:
+                output_text += f"\n• **{device['name']}**\n"
+                output_text += f"  - Type: {device['type'].upper()}\n"
+                output_text += f"  - VRAM: {device['vram_gb']} GB\n"
+                if 'compute_capability' in device:
+                    output_text += f"  - Compute: {device['compute_capability']}\n"
+                if 'platform' in device:
+                    output_text += f"  - Platform: {device['platform']}\n"
+            
+            output_text += "\n\n💡 **Usage:**\n"
+            output_text += "• Use `provision_gpu` with `--local-first` to prefer local GPUs\n"
+            output_text += "• Cloud overflow will be used if local pool is insufficient\n"
+        else:
+            output_text += "❌ **No local GPUs detected**\n\n"
+            output_text += "💡 **Tip:** Install PyTorch or nvidia-smi for GPU detection\n"
+            output_text += "   - CUDA: `pip install torch`\n"
+            output_text += "   - Apple Silicon: PyTorch with MPS support\n"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)]
+        )
     
     if tool_name == "quote_gpu":
         cmd_args.extend(["-g", arguments["gpu_type"]])
@@ -1366,26 +1598,316 @@ async def handle_get_prompt(request: GetPromptRequest) -> GetPromptResult:
     """Get a prompt"""
     return GetPromptResult(description="", messages=[])
 
-async def main():
-    """Main entry point"""
-    # Check if terradev is installed
-    if not check_terradev_installation():
-        print("Error: terradev CLI not found. Please install it with:", file=sys.stderr)
-        print("pip install terradev-cli", file=sys.stderr)
+# ---------------------------------------------------------------------------
+# OAuth 2.0 PKCE auth for Claude.ai Connectors
+# ---------------------------------------------------------------------------
+
+TERRADEV_MCP_BEARER_TOKEN = os.getenv("TERRADEV_MCP_BEARER_TOKEN", "")
+
+# In-memory stores (single-instance server)
+_auth_codes: Dict[str, Dict[str, Any]] = {}   # code -> {client_id, code_challenge, redirect_uri, expires}
+_access_tokens: Dict[str, Dict[str, Any]] = {}  # token -> {client_id, expires}
+
+
+def _cleanup_expired():
+    """Remove expired auth codes and tokens."""
+    now = time.time()
+    for store in (_auth_codes, _access_tokens):
+        expired = [k for k, v in store.items() if v.get("expires", 0) < now]
+        for k in expired:
+            del store[k]
+
+
+# ---------------------------------------------------------------------------
+# OAuth endpoint handlers (added as Starlette routes)
+# ---------------------------------------------------------------------------
+
+async def oauth_authorization_server_metadata(request: Request) -> JSONResponse:
+    """RFC 8414 — OAuth Authorization Server Metadata."""
+    base = str(request.base_url).rstrip("/")
+    return JSONResponse({
+        "issuer": base,
+        "authorization_endpoint": base + "/authorize",
+        "token_endpoint": base + "/token",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none"],
+    })
+
+
+async def oauth_protected_resource(request: Request) -> JSONResponse:
+    """RFC 9728 — OAuth Protected Resource Metadata."""
+    base = str(request.base_url).rstrip("/")
+    return JSONResponse({
+        "resource": base,
+        "authorization_servers": [base],
+        "bearer_methods_supported": ["header"],
+    })
+
+
+async def oauth_authorize(request: Request) -> Response:
+    """OAuth 2.0 Authorization Endpoint — auto-approves if client_id matches our token."""
+    from starlette.responses import RedirectResponse
+
+    params = dict(request.query_params)
+    client_id = params.get("client_id", "")
+    redirect_uri = params.get("redirect_uri", "")
+    code_challenge = params.get("code_challenge", "")
+    code_challenge_method = params.get("code_challenge_method", "")
+    state = params.get("state", "")
+
+    logger.info("OAuth authorize: client_id=%s... redirect=%s", client_id[:16], redirect_uri)
+
+    # Validate client_id matches our configured token
+    if TERRADEV_MCP_BEARER_TOKEN and client_id != TERRADEV_MCP_BEARER_TOKEN:
+        logger.warning("OAuth authorize rejected: bad client_id")
+        return JSONResponse({"error": "invalid_client"}, status_code=401)
+
+    if code_challenge_method and code_challenge_method != "S256":
+        return JSONResponse({"error": "invalid_request", "error_description": "Only S256 supported"}, status_code=400)
+
+    # Generate authorization code
+    _cleanup_expired()
+    code = secrets.token_urlsafe(48)
+    _auth_codes[code] = {
+        "client_id": client_id,
+        "code_challenge": code_challenge,
+        "redirect_uri": redirect_uri,
+        "expires": time.time() + 300,  # 5 min
+    }
+
+    # Redirect back to Claude.ai with the code
+    sep = "&" if "?" in redirect_uri else "?"
+    redirect = redirect_uri + sep + urlencode({"code": code, "state": state})
+    logger.info("OAuth authorize: issuing code, redirecting to %s", redirect_uri)
+    return RedirectResponse(url=redirect, status_code=302)
+
+
+async def oauth_token(request: Request) -> JSONResponse:
+    """OAuth 2.0 Token Endpoint — exchanges auth code for access token (PKCE)."""
+    if request.method == "GET":
+        return JSONResponse({"error": "method_not_allowed"}, status_code=405)
+
+    try:
+        body = await request.form()
+    except Exception:
+        body = {}
+    body = dict(body)
+
+    grant_type = body.get("grant_type", "")
+    code = body.get("code", "")
+    code_verifier = body.get("code_verifier", "")
+    client_id = body.get("client_id", "")
+    redirect_uri = body.get("redirect_uri", "")
+
+    logger.info("OAuth token: grant_type=%s client_id=%s...", grant_type, (client_id or "")[:16])
+
+    if grant_type != "authorization_code":
+        return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
+
+    _cleanup_expired()
+    auth_data = _auth_codes.pop(code, None)
+    if not auth_data:
+        logger.warning("OAuth token: invalid or expired code")
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+
+    # Verify PKCE code_challenge
+    if auth_data.get("code_challenge") and code_verifier:
+        digest = hashlib.sha256(code_verifier.encode()).digest()
+        expected = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+        if expected != auth_data["code_challenge"]:
+            logger.warning("OAuth token: PKCE verification failed")
+            return JSONResponse({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
+
+    # Issue access token
+    access_token = secrets.token_urlsafe(48)
+    _access_tokens[access_token] = {
+        "client_id": auth_data["client_id"],
+        "expires": time.time() + 86400,  # 24 hours
+    }
+
+    logger.info("OAuth token: issued access token for client_id=%s...", auth_data["client_id"][:16])
+    return JSONResponse({
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": 86400,
+    })
+
+
+# ---------------------------------------------------------------------------
+# ASGI auth middleware (validates Bearer tokens from OAuth flow)
+# ---------------------------------------------------------------------------
+
+# Paths that don't require auth
+_PUBLIC_PATHS = frozenset([
+    "/health",
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/sse",
+    "/authorize",
+    "/token",
+])
+
+
+class OAuthBearerMiddleware:
+    """Pure ASGI middleware — validates OAuth Bearer tokens on protected routes."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        method = scope.get("method", "?")
+
+        # Public routes pass through
+        if path in _PUBLIC_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        # Extract auth header
+        headers_raw = scope.get("headers", [])
+        header_dict = {k.decode(): v.decode() for k, v in headers_raw}
+        auth = header_dict.get("authorization", "")
+
+        logger.info("Request: %s %s host=%s auth=%s",
+                     method, path,
+                     header_dict.get("host", "-"),
+                     auth[:30] + "..." if auth else "-")
+
+        if not auth.startswith("Bearer "):
+            logger.warning("Auth rejected for %s %s (no Bearer token)", method, path)
+            response = JSONResponse({"error": "unauthorized"}, status_code=401)
+            await response(scope, receive, send)
+            return
+
+        token = auth[7:]  # strip "Bearer "
+
+        # Accept the raw configured token OR any valid OAuth-issued token
+        _cleanup_expired()
+        if token == TERRADEV_MCP_BEARER_TOKEN:
+            await self.app(scope, receive, send)
+            return
+
+        if token in _access_tokens:
+            await self.app(scope, receive, send)
+            return
+
+        logger.warning("Auth rejected for %s %s (invalid token)", method, path)
+        response = JSONResponse({"error": "unauthorized"}, status_code=401)
+        await response(scope, receive, send)
+
+
+# ---------------------------------------------------------------------------
+# SSE app factory
+# ---------------------------------------------------------------------------
+
+def create_sse_app() -> "Starlette":
+    """Build the Starlette app that exposes the MCP server over SSE."""
+    if Starlette is None:
+        print(
+            "Error: starlette/uvicorn not installed. "
+            "Install with: pip install 'mcp[cli]' starlette uvicorn",
+            file=sys.stderr,
+        )
         sys.exit(1)
+
+    security_settings = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "terradev-mcp.terradev.cloud",
+            "localhost:8090",
+            "127.0.0.1:8090",
+        ],
+        allowed_origins=[
+            "https://claude.ai",
+            "https://www.claude.ai",
+            "https://terradev-mcp.terradev.cloud",
+        ],
+    )
+    sse_transport = SseServerTransport("/messages", security_settings=security_settings)
+
     
-    # Check for required environment variable
-    if not os.getenv("TERRADEV_RUNPOD_KEY"):
-        print("Warning: TERRADEV_RUNPOD_KEY not set. Some functionality may be limited.", file=sys.stderr)
+    async def handle_messages(request: Request) -> None:
+        await sse_transport.handle_post_message(
+            request.scope, request.receive, request._send
+        )
+
+    async def health(request: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok", "server": "terradev-mcp", "version": "1.2.2"})
+
+    # SSE handler wraps the MCP server
+    class SseHandler:
+        def __init__(self):
+            self._server = server
+            
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                return
+            
+            # SSE endpoint only accepts GET requests
+            if scope["method"] != "GET":
+                from starlette.responses import Response
+                response = Response("Method Not Allowed - SSE endpoint only accepts GET", status_code=405)
+                await response(scope, receive, send)
+                return
+            
+            async with sse_transport.connect_sse(
+                scope, receive, send
+            ) as streams:
+                await self._server.run(
+                    streams[0],
+                    streams[1],
+                    InitializationOptions(
+                        server_name="terradev-mcp",
+                        server_version="1.2.2",
+                        capabilities=self._server.get_capabilities(
+                            notification_options=NotificationOptions(),
+                            experimental_capabilities=None,
+                        ),
+                    ),
+                )
     
-    # Run the server
+    sse_handler = SseHandler()
+
+    inner_app = Starlette(
+        debug=False,
+        routes=[
+            # OAuth 2.0 endpoints (public — handled before auth middleware)
+            Route("/.well-known/oauth-authorization-server", endpoint=oauth_authorization_server_metadata),
+            Route("/.well-known/oauth-protected-resource", endpoint=oauth_protected_resource),
+            Route("/.well-known/oauth-protected-resource/sse", endpoint=oauth_protected_resource),
+            Route("/authorize", endpoint=oauth_authorize),
+            Route("/token", endpoint=oauth_token, methods=["POST"]),
+            # MCP endpoints
+            Route("/health", endpoint=health),
+            Route("/sse", endpoint=sse_handler),
+            Route("/messages/{path:path}", endpoint=handle_messages, methods=["POST"]),
+            Route("/messages", endpoint=handle_messages, methods=["POST"]),
+        ],
+    )
+
+    app = OAuthBearerMiddleware(inner_app)
+    return app
+
+
+# ---------------------------------------------------------------------------
+# Entry points
+# ---------------------------------------------------------------------------
+
+async def run_stdio():
+    """Run in stdio mode (Claude Code / local)."""
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
             write_stream,
             InitializationOptions(
                 server_name="terradev-mcp",
-                server_version="1.0.0",
+                server_version="1.2.2",
                 capabilities=server.get_capabilities(
                     notification_options=None,
                     experimental_capabilities=None,
@@ -1393,5 +1915,44 @@ async def main():
             ),
         )
 
+
+def main():
+    """Main entry point — supports both stdio and SSE transports."""
+    parser = argparse.ArgumentParser(description="Terradev MCP Server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse"],
+        default="stdio",
+        help="Transport mode: stdio (default, for Claude Code) or sse (remote, for Claude.ai Connectors)",
+    )
+    parser.add_argument("--host", default="0.0.0.0", help="SSE host (default: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8080, help="SSE port (default: 8080)")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
+
+    # Check if terradev is installed
+    if not check_terradev_installation():
+        logger.warning("terradev CLI not found. Tools will fail until installed: pip install terradev-cli")
+
+    if not os.getenv("TERRADEV_RUNPOD_KEY"):
+        logger.warning("TERRADEV_RUNPOD_KEY not set. Some functionality may be limited.")
+
+    if args.transport == "stdio":
+        asyncio.run(run_stdio())
+    else:
+        if not TERRADEV_MCP_BEARER_TOKEN:
+            logger.warning(
+                "TERRADEV_MCP_BEARER_TOKEN is not set — SSE endpoint is UNAUTHENTICATED. "
+                "Set this env var in production."
+            )
+        app = create_sse_app()
+        logger.info("Starting Terradev MCP SSE server on %s:%s", args.host, args.port)
+        uvicorn.run(app, host=args.host, port=args.port)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  terradev-mcp:
+    build: .
+    container_name: terradev-mcp-sse
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - TERRADEV_MCP_BEARER_TOKEN=${TERRADEV_MCP_BEARER_TOKEN}
+      - TERRADEV_RUNPOD_KEY=${TERRADEV_RUNPOD_KEY}
+      - TERRADEV_VASTAI_KEY=${TERRADEV_VASTAI_KEY:-}
+      - TERRADEV_AWS_ACCESS_KEY_ID=${TERRADEV_AWS_ACCESS_KEY_ID:-}
+      - TERRADEV_AWS_SECRET_ACCESS_KEY=${TERRADEV_AWS_SECRET_ACCESS_KEY:-}
+      - TERRADEV_AWS_DEFAULT_REGION=${TERRADEV_AWS_DEFAULT_REGION:-us-east-1}
+      - TERRADEV_LAMBDA_API_KEY=${TERRADEV_LAMBDA_API_KEY:-}
+      - TERRADEV_COREWEAVE_API_KEY=${TERRADEV_COREWEAVE_API_KEY:-}
+      - TERRADEV_TENSORDOCK_API_KEY=${TERRADEV_TENSORDOCK_API_KEY:-}
+      - TERRADEV_CRUSOE_API_KEY=${TERRADEV_CRUSOE_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

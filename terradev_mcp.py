@@ -1175,6 +1175,194 @@ async def handle_list_tools() -> ListToolsResult:
                 },
                 "required": ["provider"]
             }
+        ),
+        # ── v3.2.0 Tools: Semantic Routing, Disaggregated Inference, GPU Topology, Price Intelligence ──
+        Tool(
+            name="infer_route",
+            description="Semantic-aware inference routing. Analyzes query content across 6 signal dimensions (modality, complexity, domain, language, safety, keywords), applies NUMA-aware endpoint scoring, and selects the optimal inference endpoint. Uses Terraform-style DAG parallel execution for signal extraction.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model": {
+                        "type": "string",
+                        "description": "Filter by model name (e.g., llama-3-70b, deepseek-coder-33b)"
+                    },
+                    "strategy": {
+                        "type": "string",
+                        "description": "Routing strategy",
+                        "enum": ["latency", "cost", "score"],
+                        "default": "latency"
+                    },
+                    "measure": {
+                        "type": "boolean",
+                        "description": "Run fresh latency measurements (HTTP TTFB / WebPageTest) before routing",
+                        "default": False
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="infer_route_disagg",
+            description="Disaggregated Prefill/Decode routing (DistServe architecture). Splits LLM inference into compute-bound prefill phase (routed to FLOPS-optimized GPUs like H100 SXM) and memory-bound decode phase (routed to bandwidth-optimized GPUs like MI300X). Tracks KV cache handoffs between endpoint pairs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model": {
+                        "type": "string",
+                        "description": "Model name for disaggregated pair selection (e.g., llama-3-70b)"
+                    },
+                    "check_health": {
+                        "type": "boolean",
+                        "description": "Run health probes before selecting pairs",
+                        "default": True
+                    }
+                },
+                "required": ["model"]
+            }
+        ),
+        Tool(
+            name="infer_status",
+            description="Show inference endpoint health, latency, failover status, and disaggregated phase assignments (PREFILL/DECODE/MIXED). Includes KV cache warm status per endpoint.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "check": {
+                        "type": "boolean",
+                        "description": "Run live health probes before showing status",
+                        "default": False
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="infer_failover",
+            description="Run health checks and auto-failover for inference endpoints. If a primary endpoint is unhealthy and has a backup configured, traffic automatically shifts to the backup provider.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Show what would happen without executing failover",
+                        "default": False
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="gpu_topology",
+            description="GPU NUMA topology report with intra-GPU XCD (Accelerated Compute Die) awareness. Models MI300X (8 XCDs, 192GB HBM3), MI300A (6 XCDs, 128GB), H200 (unified 141GB HBM3e), H100 (80GB). Reports PCIe locality (PIX/PXB/PHB/SYS), GPU-NIC pairing, SR-IOV VF status, and generates XCD-aware NCCL/AITER environment variables.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "gpu_arch": {
+                        "type": "string",
+                        "description": "Filter by GPU architecture",
+                        "enum": ["mi300x", "mi300a", "h200", "h100", "a100", "auto"]
+                    },
+                    "generate_env": {
+                        "type": "boolean",
+                        "description": "Generate XCD-aware NCCL/AITER/CK env vars for optimal attention kernel performance",
+                        "default": True
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="price_intel",
+            description="GPU price intelligence with quantitative analytics. Computes delta (rate of change), gamma (acceleration), and annualized realized volatility on GPU spot/on-demand prices across all 15 providers. Identifies cheapest time windows and provider arbitrage opportunities.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "gpu_type": {
+                        "type": "string",
+                        "description": "GPU type to analyze",
+                        "enum": ["H100", "H200", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "RTX3090", "V100", "MI300X"]
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Number of days of history to analyze",
+                        "minimum": 1,
+                        "default": 7
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Filter to specific provider (optional)"
+                    }
+                },
+                "required": ["gpu_type"]
+            }
+        ),
+        Tool(
+            name="moe_deploy",
+            description="Deploy Mixture-of-Experts models with production-ready cluster templates. Supports GLM-5, Qwen 3.5, Mistral Large 3, DeepSeek V4, Llama 5. Configures NVLink topology, tensor parallelism, FP8 quantization, vLLM/SGLang backends, and GPU-aware HPA autoscaling.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {
+                        "type": "string",
+                        "description": "HuggingFace model ID (e.g., zai-org/GLM-5-FP8, Qwen/Qwen3.5-397B-A17B)"
+                    },
+                    "gpu_type": {
+                        "type": "string",
+                        "description": "GPU type for MoE serving",
+                        "enum": ["H100", "H200", "A100", "MI300X"]
+                    },
+                    "tp_size": {
+                        "type": "integer",
+                        "description": "Tensor parallelism size (must match NVLink domain)",
+                        "enum": [1, 2, 4, 8],
+                        "default": 8
+                    },
+                    "backend": {
+                        "type": "string",
+                        "description": "Serving backend",
+                        "enum": ["vllm", "sglang"],
+                        "default": "vllm"
+                    },
+                    "quantization": {
+                        "type": "string",
+                        "description": "Quantization method",
+                        "enum": ["fp8", "bf16", "awq", "gptq"],
+                        "default": "fp8"
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Show deployment plan without executing",
+                        "default": False
+                    }
+                },
+                "required": ["model_id", "gpu_type"]
+            }
+        ),
+        Tool(
+            name="gitops_init",
+            description="Initialize GitOps repository with ArgoCD or Flux CD. Creates cluster manifests, app definitions, policy-as-code templates, and multi-environment structure. Supports GitHub, GitLab, Bitbucket, Azure DevOps.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Git repository (e.g., my-org/infra)"
+                    },
+                    "tool": {
+                        "type": "string",
+                        "description": "GitOps tool to use",
+                        "enum": ["argocd", "flux"],
+                        "default": "argocd"
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Git provider",
+                        "enum": ["github", "gitlab", "bitbucket", "azure-devops"],
+                        "default": "github"
+                    },
+                    "cluster": {
+                        "type": "string",
+                        "description": "Target cluster name"
+                    }
+                },
+                "required": ["repo"]
+            }
         )
     ]
     
@@ -1208,7 +1396,16 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         "analytics": ["analytics"],
         "optimize": ["optimize"],
         "setup_provider": ["setup"],
-        "configure_provider": ["configure"]
+        "configure_provider": ["configure"],
+        # v3.2.0 tools
+        "infer_route": ["inference", "route"],
+        "infer_route_disagg": ["inference", "route"],
+        "infer_status": ["inference", "status"],
+        "infer_failover": ["inference", "failover"],
+        "gpu_topology": ["inference", "topology"],
+        "price_intel": ["analytics"],
+        "moe_deploy": ["provision"],
+        "gitops_init": ["gitops", "init"],
     }
     
     if tool_name not in command_map:
@@ -1564,6 +1761,260 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
     elif tool_name == "configure_provider":
         cmd_args.extend(["--provider", arguments["provider"]])
     
+    # ── v3.2.0 Handlers ──────────────────────────────────────────────────
+
+    elif tool_name == "infer_route":
+        # Semantic-aware inference routing via terradev inference route
+        cmd_args = ["inference", "route"]
+        if "model" in arguments:
+            cmd_args.extend(["--model", arguments["model"]])
+        strategy = arguments.get("strategy", "latency")
+        cmd_args.extend(["--strategy", strategy])
+        if arguments.get("measure"):
+            cmd_args.append("--measure")
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        output_text = "🧠 **Semantic Inference Routing**\n\n"
+        if result["success"]:
+            output_text += f"**Strategy:** {strategy}\n"
+            output_text += f"**Signals:** modality, complexity, domain, language, safety, keywords\n"
+            output_text += f"**NUMA scoring:** enabled\n\n"
+            output_text += output
+        else:
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "💡 **Tip:** Register inference endpoints first with:\n"
+            output_text += "   `terradev inference deploy --provider runpod --model <model>`\n"
+            output_text += "   Then route with: `terradev inference route --strategy latency`"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    elif tool_name == "infer_route_disagg":
+        # Disaggregated prefill/decode routing
+        cmd_args = ["inference", "route", "--disagg"]
+        cmd_args.extend(["--model", arguments["model"]])
+        if arguments.get("check_health", True):
+            cmd_args.append("--check")
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        output_text = "⚡ **Disaggregated Prefill/Decode Routing (DistServe)**\n\n"
+        if result["success"]:
+            output_text += f"**Model:** {arguments['model']}\n"
+            output_text += "**Architecture:** DistServe — PREFILL (compute-bound) → DECODE (memory-bound)\n"
+            output_text += "**KV Cache Handoff:** tracked via PrefillDecodeTracker\n\n"
+            output_text += output
+        else:
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "💡 **Tip:** Disaggregated routing requires endpoints tagged with phase:\n"
+            output_text += "   PREFILL endpoints: high-FLOPS GPUs (H100 SXM)\n"
+            output_text += "   DECODE endpoints: high-bandwidth GPUs (H200, MI300X)\n"
+            output_text += "   Register with: `terradev inference deploy --phase prefill --gpu H100`"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    elif tool_name == "infer_status":
+        cmd_args = ["inference", "status"]
+        if arguments.get("check"):
+            cmd_args.append("--check")
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        output_text = "📊 **Inference Endpoint Status**\n\n"
+        if result["success"]:
+            output_text += output
+        else:
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "💡 No inference endpoints registered. Deploy one with:\n"
+            output_text += "   `terradev inference deploy --provider runpod --model <model> --gpu H100`"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    elif tool_name == "infer_failover":
+        cmd_args = ["inference", "failover"]
+        if arguments.get("dry_run"):
+            cmd_args.append("--dry-run")
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        output_text = "🔄 **Inference Auto-Failover**\n\n"
+        if result["success"]:
+            output_text += output
+        else:
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "💡 Register backup endpoints with:\n"
+            output_text += "   `terradev inference deploy --provider <backup> --model <model> --backup`"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    elif tool_name == "gpu_topology":
+        cmd_args = ["inference", "topology"]
+        gpu_arch = arguments.get("gpu_arch", "auto")
+        if gpu_arch and gpu_arch != "auto":
+            cmd_args.extend(["--arch", gpu_arch])
+        if arguments.get("generate_env", True):
+            cmd_args.append("--env")
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        output_text = "🔬 **GPU NUMA Topology Report**\n\n"
+        if result["success"]:
+            output_text += output
+            if arguments.get("generate_env", True):
+                output_text += "\n\n**XCD-Aware Environment Variables Generated**\n"
+                output_text += "Apply these to your vLLM/SGLang process for optimal attention kernel performance.\n"
+        else:
+            # Provide useful topology info even without live GPUs
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "📋 **Reference: Intra-GPU NUMA Topology**\n\n"
+            output_text += "| GPU | XCDs | HBM | Architecture |\n"
+            output_text += "|-----|------|-----|-------------|\n"
+            output_text += "| MI300X | 8 XCDs | 192GB HBM3 | CDNA3 chiplet |\n"
+            output_text += "| MI300A | 6 XCDs | 128GB HBM3 | CDNA3 APU |\n"
+            output_text += "| H200 | 1 (unified) | 141GB HBM3e | Hopper |\n"
+            output_text += "| H100 SXM | 1 (unified) | 80GB HBM3 | Hopper |\n"
+            output_text += "| A100 | 1 (unified) | 80GB HBM2e | Ampere |\n\n"
+            output_text += "💡 **XCD-aware env vars for MI300X:**\n"
+            output_text += "```\n"
+            output_text += "AITER_XCD_AWARE_ATTENTION=1\n"
+            output_text += "CK_BLOCK_MAPPING_POLICY=xcd_aware\n"
+            output_text += "NCCL_INTRA_GPU_NUMA=1\n"
+            output_text += "```"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    elif tool_name == "price_intel":
+        gpu_type = arguments["gpu_type"]
+        days = arguments.get("days", 7)
+        cmd_args = ["analytics", "--price-intel", "--gpu", gpu_type, "--days", str(days)]
+        if "provider" in arguments:
+            cmd_args.extend(["--provider", arguments["provider"]])
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        output_text = f"📈 **GPU Price Intelligence — {gpu_type}**\n\n"
+        if result["success"]:
+            output_text += f"**Period:** {days} days\n"
+            output_text += "**Metrics:** delta (δ), gamma (γ), realized volatility (σ)\n\n"
+            output_text += output
+        else:
+            # Still useful — run a fresh quote to seed the price tick db
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "💡 **Tip:** Price intelligence requires historical data. Seed it with:\n"
+            output_text += f"   `terradev quote -g {gpu_type}` (run periodically to build history)\n\n"
+            output_text += "**Metrics available after seeding:**\n"
+            output_text += "- **Delta (δ):** Rate of price change ($/hr/day)\n"
+            output_text += "- **Gamma (γ):** Acceleration of price change\n"
+            output_text += "- **Realized Volatility (σ):** Annualized price volatility\n"
+            output_text += "- **Cheapest Window:** Best time to provision\n"
+            output_text += "- **Arbitrage Spread:** Max price difference across providers"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    elif tool_name == "moe_deploy":
+        model_id = arguments["model_id"]
+        gpu_type = arguments["gpu_type"]
+        tp_size = arguments.get("tp_size", 8)
+        backend = arguments.get("backend", "vllm")
+        quantization = arguments.get("quantization", "fp8")
+        dry_run = arguments.get("dry_run", False)
+        
+        cmd_args = ["provision", "--task", "clusters/moe-template/task.yaml",
+                     "--set", f"model_id={model_id}",
+                     "--set", f"tp_size={tp_size}",
+                     "--set", f"gpu_type={gpu_type}",
+                     "--set", f"backend={backend}",
+                     "--set", f"quantization={quantization}"]
+        if dry_run:
+            cmd_args.append("--dry-run")
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        output_text = f"🧬 **MoE Cluster Deployment**\n\n"
+        output_text += f"**Model:** {model_id}\n"
+        output_text += f"**GPU:** {gpu_type} × {tp_size} (TP={tp_size})\n"
+        output_text += f"**Backend:** {backend}\n"
+        output_text += f"**Quantization:** {quantization}\n"
+        output_text += f"**Dry Run:** {dry_run}\n\n"
+        
+        if result["success"]:
+            output_text += output
+        else:
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "💡 **Manual deployment:**\n"
+            output_text += f"```bash\n"
+            output_text += f"terradev provision --task clusters/moe-template/task.yaml \\\n"
+            output_text += f"  --set model_id={model_id} --set tp_size={tp_size}\n"
+            output_text += f"```\n\n"
+            output_text += "**Or via Kubernetes:**\n"
+            output_text += f"```bash\n"
+            output_text += f"kubectl apply -f clusters/moe-template/k8s/\n"
+            output_text += f"```"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    elif tool_name == "gitops_init":
+        repo = arguments["repo"]
+        tool = arguments.get("tool", "argocd")
+        provider = arguments.get("provider", "github")
+        cluster = arguments.get("cluster", "production")
+        
+        cmd_args = ["gitops", "init",
+                     "--provider", provider,
+                     "--repo", repo,
+                     "--tool", tool,
+                     "--cluster", cluster]
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        output_text = f"🔧 **GitOps Repository Initialized**\n\n"
+        if result["success"]:
+            output_text += f"**Repository:** {repo}\n"
+            output_text += f"**Tool:** {tool}\n"
+            output_text += f"**Provider:** {provider}\n"
+            output_text += f"**Cluster:** {cluster}\n\n"
+            output_text += output
+            output_text += "\n\n**Next steps:**\n"
+            output_text += f"1. `terradev gitops bootstrap --tool {tool} --cluster {cluster}`\n"
+            output_text += f"2. `terradev gitops sync --cluster {cluster} --environment prod`\n"
+            output_text += f"3. `terradev gitops validate --dry-run --cluster {cluster}`"
+        else:
+            output_text += f"⚠️ {output}"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
     # Execute the command
     result = await execute_terradev_command(cmd_args)
     
@@ -1838,7 +2289,7 @@ def create_sse_app() -> "Starlette":
         )
 
     async def health(request: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok", "server": "terradev-mcp", "version": "1.2.3"})
+        return JSONResponse({"status": "ok", "server": "terradev-mcp", "version": "1.4.0"})
 
     # SSE handler wraps the MCP server
     class SseHandler:
@@ -1864,7 +2315,7 @@ def create_sse_app() -> "Starlette":
                     streams[1],
                     InitializationOptions(
                         server_name="terradev-mcp",
-                        server_version="1.2.3",
+                        server_version="1.4.0",
                         capabilities=self._server.get_capabilities(
                             notification_options=NotificationOptions(),
                             experimental_capabilities=None,
@@ -1907,7 +2358,7 @@ async def run_stdio():
             write_stream,
             InitializationOptions(
                 server_name="terradev-mcp",
-                server_version="1.2.3",
+                server_version="1.4.0",
                 capabilities=server.get_capabilities(
                     notification_options=None,
                     experimental_capabilities=None,

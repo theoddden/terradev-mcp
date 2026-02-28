@@ -1,13 +1,22 @@
-# Terradev MCP Server v1.2.3
+# Terradev MCP Server v1.5.0
 
-GPU Cloud Provisioning for Claude Code - **Terraform-powered parallel GPU provisioning** across 11+ cloud providers.
+GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NIXL KV transfer, and Terraform-powered parallel GPU provisioning** across 15 cloud providers.
 
-## 🚀 What's New in v1.2.3
+## What's New in v1.5.0
 
-- **🏠 Local GPU Discovery**: Scan your local machines for available GPUs (Mac Mini M4 + RTX 4090 = 48GB pool!)
-- **🔀 Hybrid Local/Cloud Orchestration**: Local-first provisioning with automatic cloud overflow
-- **💬 Helpful Error Messages**: Clear guidance when API keys are missing or dependencies aren't installed
-- **🔌 Claude.ai Connector**: Fully working OAuth 2.0 PKCE flow for remote access
+- **Ray Serve LLM Integration**: Wide Expert Parallelism (EP) and disaggregated Prefill/Decode deployment via Ray Serve
+- **Expert Parallelism (EP)**: Distribute MoE experts across GPUs with EPLB load balancing and Dual-Batch Overlap
+- **NIXL KV Connector**: Zero-copy GPU-to-GPU KV cache transfer over RDMA/NVLink for disaggregated serving
+- **DeepEP + DeepGEMM**: Auto-configured environment variables for optimized MoE kernels
+- **MoE-Aware Orchestrator**: Weight vs active memory distinction (744B total, 40B active) for accurate scheduling
+- **EP Group Routing**: Inference router tracks expert ranges per rank and routes to the GPU hosting target experts
+- **SGLang Lifecycle**: Real SSH/systemd server management with EP/EPLB/DBO flags
+- **Transport-Aware P/D Routing**: NIXL+RDMA > NIXL > LMCache scoring for KV cache handoff
+
+### Previous Releases
+- **Local GPU Discovery**: Scan local machines for available GPUs (Mac Mini M4 + RTX 4090 = 48GB pool!)
+- **Hybrid Local/Cloud Orchestration**: Local-first provisioning with automatic cloud overflow
+- **Claude.ai Connector**: Fully working OAuth 2.0 PKCE flow for remote access
 - **MoE Cluster Templates**: Production-ready infrastructure for Mixture-of-Experts models
 - **NVLink Topology Enforcement**: Automatic single-node TP with NUMA-aligned GPU placement
 - **Terraform Core Engine**: All GPU provisioning uses Terraform for optimal parallel efficiency
@@ -25,7 +34,7 @@ GPU Cloud Provisioning for Claude Code - **Terraform-powered parallel GPU provis
 
 ### Prerequisites
 
-1. Install Terradev CLI:
+1. Install Terradev CLI (v3.3.0+):
 ```bash
 pip install terradev-cli
 # For all providers + HF Spaces:
@@ -95,7 +104,7 @@ See `nginx-mcp.conf` for reverse proxy configuration with SSL.
 
 ## Available MCP Tools
 
-The Terradev MCP server provides 17 tools for complete GPU cloud management:
+The Terradev MCP server provides 20+ tools for complete GPU cloud management:
 
 ### GPU Operations
 - **`local_scan`** - Discover local GPU devices and total VRAM pool (NEW in v1.2.2)
@@ -119,6 +128,13 @@ The Terradev MCP server provides 17 tools for complete GPU cloud management:
 - **`inferx_list`** - List deployed inference models
 - **`inferx_optimize`** - Get cost analysis for inference endpoints
 - **`hf_space_deploy`** - Deploy models to HuggingFace Spaces
+
+### MoE Expert Parallelism (NEW in v1.5.0)
+- **`deploy_wide_ep`** - Deploy MoE model with Wide-EP across multiple GPUs via Ray Serve LLM
+- **`deploy_pd`** - Deploy disaggregated Prefill/Decode serving with NIXL KV transfer
+- **`ep_group_status`** - Health check EP groups (all ranks must be healthy for all-to-all)
+- **`sglang_start`** - Start SGLang server with EP/EPLB/DBO flags via SSH/systemd
+- **`sglang_stop`** - Stop SGLang server on remote instance
 
 ### Instance & Cost Management
 - **`status`** - View all instances and costs
@@ -328,6 +344,21 @@ resource "terradev_instance" "gpu" {
 }
 ```
 
+## MoE Serving Architecture (v1.5.0)
+
+Terradev v1.5.0 integrates the full MoE serving stack:
+
+| Component | What it does | Terradev integration |
+|-----------|-------------|---------------------|
+| **Ray Serve LLM** | Orchestrates Wide-EP and P/D deployments | `build_dp_deployment`, `build_pd_openai_app` |
+| **Expert Parallelism** | Distributes experts across GPUs | EP/DP flags in task.yaml, K8s, Helm, Terraform |
+| **EPLB** | Rebalances experts at runtime | `--enable-eplb` in vLLM/SGLang serving |
+| **Dual-Batch Overlap** | Overlaps compute with all-to-all | `--enable-dbo` flag |
+| **DeepEP kernels** | Optimized all-to-all for MoE | `VLLM_ALL2ALL_BACKEND=deepep_low_latency` |
+| **DeepGEMM** | FP8 GEMM for MoE experts | `VLLM_USE_DEEP_GEMM=1` |
+| **NIXL** | Zero-copy KV cache transfer | `NixlConnector` in P/D tracker |
+| **EP Group Router** | Routes to rank hosting target experts | Expert range tracking per endpoint |
+
 ## Supported Cloud Providers
 
 RunPod, Vast.ai, AWS, GCP, Azure, Lambda Labs, CoreWeave, TensorDock, Oracle Cloud, Crusoe Cloud, DigitalOcean, HyperStack
@@ -365,5 +396,6 @@ Full multi-cloud setup:
 ## Links
 
 - [GitHub](https://github.com/theoddden/Terradev)
-- [PyPI](https://pypi.org/project/terradev-cli/)
+- [PyPI](https://pypi.org/project/terradev-cli/) (v3.3.0)
+- [NPM](https://www.npmjs.com/package/terradev-mcp) (v1.5.0)
 - [Docs](https://theodden.github.io/Terradev/)

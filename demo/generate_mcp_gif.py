@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
 Generate Terradev MCP Server demo GIF purely with Python + Pillow.
-Shows Claude Code MCP interactions: GPU quotes, Wide-EP MoE deployment,
-NIXL KV transfer, EP group health checks.
 
-Commands are typed word-by-word. Output streams line-by-line.
+All output formats match the actual codebase:
+  - Scene 1: quote_gpu  → real CLI format from cli.py:1564-1571
+  - Scene 2: moe_deploy → real MCP handler from terradev_mcp.py:1958-1977
+  - Scene 3: infer_route_disagg → real MCP handler from terradev_mcp.py:1796-1822
+  - Scene 4: provision_gpu → real CLI format from cli.py:2278-2294
 
 Usage:
     python demo/generate_mcp_gif.py
@@ -160,6 +162,12 @@ def hold(lines, ms):
 
 
 # ── Demo Scenes ──────────────────────────────────────────────────────────
+# All output formats sourced from actual codebase:
+#   cli.py:1564-1571        — quote table format
+#   cli.py:2278-2294        — provision results format
+#   terradev_mcp.py:1424-1451 — local_scan MCP output
+#   terradev_mcp.py:1796-1822 — infer_route_disagg MCP output
+#   terradev_mcp.py:1938-1982 — moe_deploy MCP output
 
 def build_frames():
     all_frames = []
@@ -169,136 +177,233 @@ def build_frames():
         all_frames.extend(f)
         all_durations.extend(d)
 
-    prompt = [("claude ", PURPLE), ("> ", DIM)]
+    # Claude Code shows tool calls as: ToolName(args) then result
+    # We simulate the Claude Code conversation view
+
+    prompt = [("You: ", PURPLE)]
 
     # ═══════════════════════════════════════════════════════════════════
-    # Scene 1: MCP Tool — quote_gpu H100
+    # Scene 1: quote_gpu — exact CLI output format from cli.py:1564-1571
     # ═══════════════════════════════════════════════════════════════════
 
-    f, d, lines = type_command([], prompt, "quote_gpu H100", word_delay=140)
+    f, d, lines = type_command([], prompt, "Get H100 prices across all providers", word_delay=110)
     add(f, d)
 
-    output1 = [
+    # Claude Code shows tool call name then result
+    tool_header = [
         ("", FG),
-        [("MCP ", PURPLE), ("tool: quote_gpu", CYAN)],
-        [("Scanning 15 providers in parallel...", DIM)],
+        [("Claude: ", BLUE), ("Using ", DIM), ("quote_gpu", CYAN), (" tool", DIM)],
+        [("   quote ", FG), ("-g H100", YELLOW)],
+        ("", FG),
+        # Real output: cli.py line 1527
+        ("Querying providers for H100 pricing...", DIM),
     ]
-    f, d, lines = stream_output(lines, output1, line_delay=500)
+    f, d, lines = stream_output(lines, tool_header, line_delay=400)
+    add(f, d)
+    add(*hold(lines, 600))
+
+    # Real quote table format: cli.py lines 1564-1571
+    # print(f"\nTerradev Quote — {gpu_type}")
+    # print(f"{'#':<4} {'Provider':<14} {'Region':<16} {'$/hr':<10} {'Type':<10}")
+    # print("-" * 58)
+    # print(f"{i+1:<4} {q['provider']:<14} {q['region']:<16} ${q['price']:<9.2f} {spot:<10}")
+    table_lines = [
+        ("", FG),
+        ("Terradev Quote — H100", YELLOW),
+        [("#   ", DIM), ("Provider      ", FG), ("Region           ", FG), ("$/hr      ", FG), ("Type", FG)],
+        ("-" * 58, DIM),
+        [("1   ", DIM), ("RunPod        ", FG), ("US-TX            ", FG), ("$2.49     ", GREEN), ("spot", GREEN)],
+        [("2   ", DIM), ("Vast.ai       ", FG), ("US-Central       ", FG), ("$2.69     ", GREEN), ("spot", GREEN)],
+        [("3   ", DIM), ("TensorDock    ", FG), ("US-East          ", FG), ("$2.89     ", FG), ("spot", FG)],
+        [("4   ", DIM), ("CoreWeave     ", FG), ("LAS1             ", FG), ("$3.04     ", FG), ("spot", FG)],
+        [("5   ", DIM), ("Lambda        ", FG), ("us-west-1        ", FG), ("$3.29     ", FG), ("on-demand", DIM)],
+        [("6   ", DIM), ("AWS           ", FG), ("us-east-1        ", FG), ("$4.68     ", DIM), ("spot", DIM)],
+        ("", FG),
+        # Real output: cli.py lines 1571-1573
+        [("Best: ", FG), ("$2.49/hr on RunPod (US-TX)", GREEN)],
+        [("Estimated monthly: ", DIM), ("$1,818", YELLOW)],
+        ("", FG),
+        # Real output: cli.py lines 1587-1588
+        [("Provision: ", DIM), ("terradev provision -g H100", CYAN)],
+    ]
+    f, d, lines = stream_output(lines, table_lines, line_delay=55)
+    add(f, d)
+    add(*hold(lines, 2800))
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Scene 2: moe_deploy — exact MCP handler from terradev_mcp.py:1938-1977
+    # ═══════════════════════════════════════════════════════════════════
+
+    f, d, lines = type_command([], prompt, "Deploy GLM-5 MoE on 8x H100 with EP", word_delay=110)
+    add(f, d)
+
+    moe_header = [
+        ("", FG),
+        [("Claude: ", BLUE), ("Using ", DIM), ("moe_deploy", CYAN), (" tool", DIM)],
+        [("   provision --task clusters/moe-template/task.yaml \\", FG)],
+        [("     --set model_id=zai-org/GLM-5-FP8 --set tp_size=8", CYAN)],
+        ("", FG),
+    ]
+    f, d, lines = stream_output(lines, moe_header, line_delay=200)
+    add(f, d)
+
+    # Real MCP output: terradev_mcp.py lines 1958-1963
+    # output_text = f"🧬 **MoE Cluster Deployment**\n\n"
+    # output_text += f"**Model:** {model_id}\n"
+    # output_text += f"**GPU:** {gpu_type} × {tp_size} (TP={tp_size})\n"
+    # output_text += f"**Backend:** {backend}\n"
+    # output_text += f"**Quantization:** {quantization}\n"
+    # output_text += f"**Dry Run:** {dry_run}\n\n"
+    moe_result = [
+        ("MoE Cluster Deployment", MAGENTA),
+        ("", FG),
+        [("Model:        ", DIM), ("zai-org/GLM-5-FP8", FG)],
+        [("GPU:          ", DIM), ("H100 x 8 (TP=8)", YELLOW)],
+        [("Backend:      ", DIM), ("vllm", FG)],
+        [("Quantization: ", DIM), ("fp8", FG)],
+        [("Dry Run:      ", DIM), ("False", FG)],
+        ("", FG),
+        # Real fallback output: terradev_mcp.py lines 1970-1977
+        ("Manual deployment:", DIM),
+        [("  terradev provision --task clusters/moe-template/task.yaml \\", CYAN)],
+        [("    --set model_id=zai-org/GLM-5-FP8 --set tp_size=8", CYAN)],
+        ("", FG),
+        ("Or via Kubernetes:", DIM),
+        [("  kubectl apply -f clusters/moe-template/k8s/", CYAN)],
+        ("", FG),
+        ("Or via Helm:", DIM),
+        [("  helm upgrade --install moe-inf ./helm/terradev \\", CYAN)],
+        [("    -f clusters/moe-template/helm/values-moe.yaml", CYAN)],
+    ]
+    f, d, lines = stream_output(lines, moe_result, line_delay=55)
+    add(f, d)
+    add(*hold(lines, 3000))
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Scene 3: infer_route_disagg — exact MCP handler from
+    # terradev_mcp.py:1796-1822
+    # ═══════════════════════════════════════════════════════════════════
+
+    f, d, lines = type_command([], prompt, "Route GLM-5 with disaggregated prefill/decode", word_delay=100)
+    add(f, d)
+
+    disagg_header = [
+        ("", FG),
+        [("Claude: ", BLUE), ("Using ", DIM), ("infer_route_disagg", CYAN), (" tool", DIM)],
+        [("   inference route --disagg --model GLM-5 --check", FG)],
+        ("", FG),
+    ]
+    f, d, lines = stream_output(lines, disagg_header, line_delay=200)
+    add(f, d)
+
+    # Real MCP output: terradev_mcp.py lines 1806-1817
+    # output_text = "⚡ **Disaggregated Prefill/Decode Routing (DistServe)**\n\n"
+    # output_text += f"**Model:** {arguments['model']}\n"
+    # output_text += "**Architecture:** DistServe — PREFILL (compute-bound) → DECODE (memory-bound)\n"
+    # output_text += "**KV Cache Handoff:** tracked via PrefillDecodeTracker\n\n"
+    disagg_result = [
+        ("Disaggregated Prefill/Decode Routing (DistServe)", MAGENTA),
+        ("", FG),
+        [("Model:            ", DIM), ("GLM-5", FG)],
+        [("Architecture:     ", DIM), ("DistServe", YELLOW)],
+        [("  PREFILL ", CYAN), ("(compute-bound)", DIM), (" -> ", FG),
+         ("DECODE ", CYAN), ("(memory-bound)", DIM)],
+        [("KV Cache Handoff: ", DIM), ("tracked via PrefillDecodeTracker", FG)],
+        ("", FG),
+        # Additional detail from inference_router.py KV connector
+        [("KV Connector:     ", DIM), ("NixlConnector", GREEN)],
+        [("Transport:        ", DIM), ("RDMA", CYAN), (" (rdma_device=mlx5_0)", DIM)],
+        [("Buffer Size:      ", DIM), ("5 GB", FG)],
+        ("", FG),
+        ("PREFILL endpoints: high-FLOPS GPUs (H100 SXM)", DIM),
+        ("DECODE endpoints:  high-bandwidth GPUs (H200, MI300X)", DIM),
+    ]
+    f, d, lines = stream_output(lines, disagg_result, line_delay=60)
+    add(f, d)
+    add(*hold(lines, 3000))
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Scene 4: provision_gpu — exact CLI output from cli.py:2278-2294
+    # ═══════════════════════════════════════════════════════════════════
+
+    f, d, lines = type_command([], prompt, "Provision 4x H100 across clouds", word_delay=110)
+    add(f, d)
+
+    prov_header = [
+        ("", FG),
+        [("Claude: ", BLUE), ("Using ", DIM), ("provision_gpu", CYAN), (" tool", DIM)],
+        [("   Terraform-powered parallel provisioning", FG)],
+        ("", FG),
+        # Real output: cli.py lines 1990-1991
+        ("Provisioning 4x H100 (parallel=6)", FG),
+        ("Querying all providers for real-time pricing...", DIM),
+    ]
+    f, d, lines = stream_output(lines, prov_header, line_delay=300)
     add(f, d)
     add(*hold(lines, 800))
 
-    header = "Provider        GPU    $/hr     Region        Spot"
-    sep = "-" * len(header)
-    table_lines = [
-        ("", FG),
-        (header, YELLOW),
-        (sep, DIM),
-        ("RunPod          H100   $2.49    US-TX         yes", GREEN),
-        ("Vast.ai         H100   $2.69    US-Central    yes", GREEN),
-        ("CoreWeave       H100   $3.04    LAS1          yes", FG),
-        ("Lambda          H100   $3.29    us-west-1     no ", FG),
-        ("AWS             H100   $4.68    us-east-1     yes", DIM),
-        (sep, DIM),
-        ("", FG),
-        [("Best: ", FG), ("$2.49/hr RunPod", GREEN), (" — saves 51% vs AWS", YELLOW)],
+    # Real output: cli.py lines 2031, 2098-2100
+    prov_mid = [
+        ("12 quotes — building allocation plan...", DIM),
+        ("Deploying 4 instance(s) across 4 cloud(s) simultaneously...", FG),
+        ("   RunPod / US-TX — $2.49/hr", DIM),
+        ("   Vast.ai / US-Central — $2.69/hr", DIM),
+        ("   CoreWeave / LAS1 — $3.04/hr", DIM),
+        ("   Lambda / us-west-1 — $3.29/hr", DIM),
     ]
-    f, d, lines = stream_output(lines, table_lines, line_delay=70)
-    add(f, d)
-    add(*hold(lines, 2500))
-
-    # ═══════════════════════════════════════════════════════════════════
-    # Scene 2: MCP Tool — deploy_wide_ep (MoE Expert Parallelism)
-    # ═══════════════════════════════════════════════════════════════════
-
-    f, d, lines = type_command([], prompt, "deploy_wide_ep GLM-5-FP8 --dp 8 --ep", word_delay=120)
-    add(f, d)
-
-    ep_output = [
-        ("", FG),
-        [("MCP ", PURPLE), ("tool: deploy_wide_ep", CYAN)],
-        ("", FG),
-        [("Model:  ", DIM), ("zai-org/GLM-5-FP8", FG), ("  (744B params, 40B active)", DIM)],
-        [("Layout: ", DIM), ("TP=1  DP=8  EP=8", YELLOW)],
-        [("Flags:  ", DIM), ("--enable-expert-parallel --enable-eplb --enable-dbo", CYAN)],
-        ("", FG),
-        [("Building Ray Serve LLM deployment...", DIM)],
-    ]
-    f, d, lines = stream_output(lines, ep_output, line_delay=100)
+    f, d, lines = stream_output(lines, prov_mid, line_delay=100)
     add(f, d)
     add(*hold(lines, 1000))
 
-    ep_result = [
+    # Real output: cli.py lines 2278-2294
+    # print(f"{'Provider':<14} {'Instance ID':<36} {'$/hr':<8} {'ms':<8}")
+    # print("-" * 70)
+    # print(f"{r['provider']:<14} {r['instance_id']:<36} ${r['price']:<7.2f} {r['elapsed_ms']:<.0f}ms")
+    # print(f"\nTotal: ${total_hr:.2f}/hr  (${total_hr*24:.2f}/day)")
+    # print(f"Group: {group_id}")
+    # print(f"Total provision time: {provision_time:.0f}ms")
+    prov_result = [
         ("", FG),
-        [("EP Group ", MAGENTA), ("across 8 GPUs:", FG)],
-        ("  Rank 0: experts   0-31   [GPU 0] NVLink domain A", FG),
-        ("  Rank 1: experts  32-63   [GPU 1] NVLink domain A", FG),
-        ("  Rank 2: experts  64-95   [GPU 2] NVLink domain A", FG),
-        ("  Rank 3: experts  96-127  [GPU 3] NVLink domain A", FG),
-        ("  Rank 4: experts 128-159  [GPU 4] NVLink domain B", FG),
-        ("  Rank 5: experts 160-191  [GPU 5] NVLink domain B", FG),
-        ("  Rank 6: experts 192-223  [GPU 6] NVLink domain B", FG),
-        ("  Rank 7: experts 224-255  [GPU 7] NVLink domain B", FG),
+        ("=" * 60, DIM),
+        ("4/4 instances launched across 4 cloud(s)", GREEN),
+        [("Provider      ", FG), ("Instance ID                          ", FG), ("$/hr    ", FG), ("ms", FG)],
+        ("-" * 70, DIM),
+        [("RunPod        ", FG), ("rpd_1709142000_a7b3c1f2              ", FG), ("$2.49   ", GREEN), ("847ms", FG)],
+        [("Vast.ai       ", FG), ("vst_1709142000_d4e5f6a8              ", FG), ("$2.69   ", GREEN), ("1203ms", FG)],
+        [("CoreWeave     ", FG), ("cwv_1709142001_b8c9d0e1              ", FG), ("$3.04   ", FG), ("956ms", FG)],
+        [("Lambda        ", FG), ("lbd_1709142001_f2a3b4c5              ", FG), ("$3.29   ", FG), ("1104ms", FG)],
         ("", FG),
-        [("Env: ", DIM), ("VLLM_USE_DEEP_GEMM=1", CYAN)],
-        [("      ", DIM), ("VLLM_ALL2ALL_BACKEND=deepep_low_latency", CYAN)],
-        ("", FG),
-        [("Deployed! ", GREEN), ("http://10.0.1.100:8000/v1", BLUE)],
+        [("Total: ", FG), ("$11.51/hr", GREEN), ("  ($276.24/day)", DIM)],
+        [("Group: ", DIM), ("pg_1709142000_a7b3c1f2", FG)],
+        [("Total provision time: ", DIM), ("1847ms", GREEN)],
     ]
-    f, d, lines = stream_output(lines, ep_result, line_delay=65)
+    f, d, lines = stream_output(lines, prov_result, line_delay=55)
     add(f, d)
     add(*hold(lines, 3000))
 
     # ═══════════════════════════════════════════════════════════════════
-    # Scene 3: MCP Tool — deploy_pd (NIXL KV Transfer)
-    # ═══════════════════════════════════════════════════════════════════
-
-    f, d, lines = type_command([], prompt, "deploy_pd GLM-5-FP8 --nixl --prefill-tp 8", word_delay=120)
-    add(f, d)
-
-    pd_output = [
-        ("", FG),
-        [("MCP ", PURPLE), ("tool: deploy_pd", CYAN)],
-        ("", FG),
-        [("Disaggregated Prefill/Decode ", MAGENTA), ("with NIXL KV transfer", FG)],
-        ("", FG),
-        [("  Prefill:  ", DIM), ("8 GPUs  TP=8", YELLOW), ("  (compute-bound)", DIM)],
-        [("  Decode:   ", DIM), ("24 GPUs TP=1 DP=24", YELLOW), ("  (memory-bound)", DIM)],
-        ("", FG),
-        [("  KV Connector: ", DIM), ("NixlConnector", GREEN)],
-        [("  Transport:    ", DIM), ("RDMA (mlx5_0)", CYAN), ("  zero-copy GPU-GPU", DIM)],
-        [("  Buffer:       ", DIM), ("5 GB per endpoint", FG)],
-        [("  Transfer:     ", DIM), ("~0.5ms / 1GB KV cache", GREEN)],
-        ("", FG),
-        [("P/D pair established ", GREEN), ("(NIXL+RDMA active)", CYAN)],
-    ]
-    f, d, lines = stream_output(lines, pd_output, line_delay=80)
-    add(f, d)
-    add(*hold(lines, 3000))
-
-    # ═══════════════════════════════════════════════════════════════════
-    # Scene 4: Closing tagline
+    # Scene 5: Closing tagline
     # ═══════════════════════════════════════════════════════════════════
 
     tag_lines = [
         ("", FG),
         ("", FG),
         ("", FG),
-        ("", FG),
         [("   terradev-mcp", CYAN), (" — GPU provisioning for Claude Code", FG)],
         ("", FG),
         [("   ", FG), ("npm install -g terradev-mcp", GREEN)],
+        [("   ", FG), ("pip install terradev-cli", GREEN)],
         ("", FG),
-        [("   Ray Serve LLM", BLUE), (" . ", DIM), ("Expert Parallelism", MAGENTA),
-         (" . ", DIM), ("NIXL KV transfer", ORANGE)],
-        [("   EPLB", CYAN), (" . ", DIM), ("DeepEP/DeepGEMM", YELLOW),
-         (" . ", DIM), ("15 cloud providers", GREEN)],
-        ("", FG),
-        [("   pip install terradev-cli", DIM), ("    ", FG),
-         ("v3.3.0", GREEN)],
-        [("   npm install -g terradev-mcp", DIM), (" ", FG),
-         ("v1.5.0", GREEN)],
+        [("   MoE Cluster Templates", BLUE), (" . ", DIM),
+         ("Expert Parallelism", MAGENTA)],
+        [("   NIXL KV Transfer", ORANGE), (" . ", DIM),
+         ("DistServe P/D Routing", CYAN)],
+        [("   Terraform Parallel Provisioning", YELLOW), (" . ", DIM),
+         ("15 Clouds", GREEN)],
         ("", FG),
         [("   github.com/theoddden/terradev-mcp", DIM)],
+        [("   pypi.org/project/terradev-cli", DIM), ("  v3.3.0", GREEN)],
+        [("   npmjs.com/package/terradev-mcp", DIM), ("  v1.5.1", GREEN)],
         ("", FG),
     ]
     f, d, _ = stream_output([], tag_lines, line_delay=120)

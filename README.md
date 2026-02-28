@@ -2,6 +2,10 @@
 
 GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NIXL KV transfer, and Terraform-powered parallel GPU provisioning** across 15 cloud providers.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/theoddden/terradev-mcp/main/demo/terradev-mcp-demo.gif" alt="Terradev MCP Demo" width="800">
+</p>
+
 ## What's New in v1.5.0
 
 - **Ray Serve LLM Integration**: Wide Expert Parallelism (EP) and disaggregated Prefill/Decode deployment via Ray Serve

@@ -1,4 +1,4 @@
-# Terradev MCP Server v1.5.1
+# Terradev MCP Server v1.5.2
 
 GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NIXL KV transfer, and Terraform-powered parallel GPU provisioning** across 15 cloud providers.
 
@@ -401,5 +401,5 @@ Full multi-cloud setup:
 
 - [GitHub](https://github.com/theoddden/Terradev)
 - [PyPI](https://pypi.org/project/terradev-cli/) (v3.3.0)
-- [NPM](https://www.npmjs.com/package/terradev-mcp) (v1.5.1)
+- [NPM](https://www.npmjs.com/package/terradev-mcp) (v1.5.2)
 - [Docs](https://theodden.github.io/Terradev/)

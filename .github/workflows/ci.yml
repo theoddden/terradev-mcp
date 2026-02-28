@@ -1,0 +1,61 @@
+name: Terradev MCP CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: pip install mcp starlette uvicorn
+
+    - name: Syntax check
+      run: python -c "import ast; ast.parse(open('terradev_mcp.py').read()); print('Syntax OK')"
+
+    - name: Validate MCP tool list
+      run: |
+        python -c "
+        import ast, sys
+        tree = ast.parse(open('terradev_mcp.py').read())
+        # Count Tool() calls in list_tools handler
+        tool_names = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and hasattr(node, 'keywords'):
+                for kw in node.keywords:
+                    if kw.arg == 'name' and isinstance(kw.value, ast.Constant):
+                        if isinstance(kw.value.value, str) and len(kw.value.value) > 2:
+                            tool_names.append(kw.value.value)
+        # v3.4.0 should have 30+ tools
+        print(f'Found {len(tool_names)} tool definitions')
+        if len(tool_names) < 25:
+            print(f'ERROR: Expected 25+ tools, found {len(tool_names)}')
+            sys.exit(1)
+        print('Tool count OK')
+        "
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+
+    - name: Publish to NPM
+      run: npm publish
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

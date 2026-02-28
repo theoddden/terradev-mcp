@@ -1363,7 +1363,75 @@ async def handle_list_tools() -> ListToolsResult:
                 },
                 "required": ["repo"]
             }
-        )
+        ),
+        # ── v3.4.0 Tools: Training Pipeline, Checkpoints, Monitoring ──
+        Tool(
+            name="train",
+            description="Launch distributed training on provisioned GPU nodes. Supports torchrun, deepspeed, accelerate, and megatron. Use from_provision='latest' to auto-resolve node IPs from your last provision command.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "script": {"type": "string", "description": "Training script path (e.g., train.py)"},
+                    "framework": {"type": "string", "description": "Training framework", "enum": ["torchrun", "deepspeed", "accelerate", "megatron"], "default": "torchrun"},
+                    "from_provision": {"type": "string", "description": "Resolve nodes from provision. Use 'latest' or a parallel_group_id."},
+                    "nodes": {"type": "array", "description": "Manual node IPs", "items": {"type": "string"}},
+                    "gpus_per_node": {"type": "integer", "description": "GPUs per node", "default": 8},
+                    "script_args": {"type": "string", "description": "Extra args for training script"}
+                },
+                "required": ["script"]
+            }
+        ),
+        Tool(
+            name="train_status",
+            description="List all training jobs and their state (created, running, completed, failed).",
+            inputSchema={"type": "object", "properties": {"job_id": {"type": "string", "description": "Filter to a specific job ID"}}}
+        ),
+        Tool(
+            name="train_monitor",
+            description="Real-time GPU monitoring for training jobs. Shows utilization, memory, temperature, power, and cost.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID to monitor"},
+                    "cost_rate": {"type": "number", "description": "$/GPU-hr for cost estimation", "default": 2.0}
+                },
+                "required": ["job_id"]
+            }
+        ),
+        Tool(
+            name="checkpoint_list",
+            description="List all checkpoints for a training job.",
+            inputSchema={"type": "object", "properties": {"job_id": {"type": "string", "description": "Job ID"}}, "required": ["job_id"]}
+        ),
+        Tool(
+            name="checkpoint_save",
+            description="Manually trigger a checkpoint save for a running training job.",
+            inputSchema={"type": "object", "properties": {"job_id": {"type": "string", "description": "Job ID"}, "step": {"type": "integer", "description": "Step number"}}, "required": ["job_id"]}
+        ),
+        Tool(
+            name="preflight",
+            description="Pre-training validation: GPU availability, NCCL, RDMA, drivers across all nodes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "nodes": {"type": "array", "description": "Node IPs to validate", "items": {"type": "string"}},
+                    "from_provision": {"type": "string", "description": "Resolve nodes from provision. 'latest' or a group ID."}
+                }
+            }
+        ),
+        Tool(
+            name="price_discovery",
+            description="Enhanced price discovery with capacity scoring, confidence intervals, and trend analysis.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "gpu_type": {"type": "string", "description": "GPU type", "enum": ["H100", "H200", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "MI300X"]},
+                    "region": {"type": "string", "description": "Filter by region"},
+                    "hours": {"type": "integer", "description": "Hours of history", "default": 24}
+                },
+                "required": ["gpu_type"]
+            }
+        ),
     ]
     
     return ListToolsResult(tools=tools)
@@ -1397,6 +1465,14 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         "optimize": ["optimize"],
         "setup_provider": ["setup"],
         "configure_provider": ["configure"],
+        # v3.4.0 tools
+        "train": ["train"],
+        "train_status": ["train-status"],
+        "train_monitor": ["monitor"],
+        "checkpoint_list": ["checkpoint", "list"],
+        "checkpoint_save": ["checkpoint", "save"],
+        "preflight": ["preflight"],
+        "price_discovery": ["price-discovery"],
         # v3.2.0 tools
         "infer_route": ["inference", "route"],
         "infer_route_disagg": ["inference", "route"],
@@ -1981,6 +2057,93 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             isError=not result["success"]
         )
     
+    # ── v3.4.0 Handlers ──────────────────────────────────────────────────
+
+    elif tool_name == "train":
+        cmd_args = ["train", "--script", arguments["script"]]
+        if "framework" in arguments:
+            cmd_args.extend(["--framework", arguments["framework"]])
+        if "from_provision" in arguments:
+            cmd_args.extend(["--from-provision", arguments["from_provision"]])
+        elif "nodes" in arguments:
+            for node in arguments["nodes"]:
+                cmd_args.extend(["--node", node])
+        if "gpus_per_node" in arguments:
+            cmd_args.extend(["--gpus-per-node", str(arguments["gpus_per_node"])])
+        if "script_args" in arguments:
+            cmd_args.extend(["--", arguments["script_args"]])
+
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🚀 **Training Launch**\n\n"
+        if result["success"]:
+            output_text += f"**Script:** {arguments['script']}\n"
+            output_text += f"**Framework:** {arguments.get('framework', 'torchrun')}\n\n"
+            output_text += output
+        else:
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "💡 **Tip:** Provision GPU nodes first:\n"
+            output_text += "   `terradev provision -g H100 -n 4`\n"
+            output_text += "   Then: `terradev train --script train.py --from-provision latest`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "train_status":
+        cmd_args = ["train-status"]
+        if "job_id" in arguments and arguments["job_id"]:
+            cmd_args.extend(["--job", arguments["job_id"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "📋 **Training Jobs**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "train_monitor":
+        cmd_args = ["monitor", "--job", arguments["job_id"]]
+        if "cost_rate" in arguments:
+            cmd_args.extend(["--cost-rate", str(arguments["cost_rate"])])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "📊 **GPU Monitor**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "checkpoint_list":
+        cmd_args = ["checkpoint", "list", "--job", arguments["job_id"]]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "💾 **Checkpoints**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "checkpoint_save":
+        cmd_args = ["checkpoint", "save", "--job", arguments["job_id"]]
+        if "step" in arguments:
+            cmd_args.extend(["--step", str(arguments["step"])])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "💾 **Checkpoint Save**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "preflight":
+        cmd_args = ["preflight"]
+        if "from_provision" in arguments:
+            cmd_args.extend(["--from-provision", arguments["from_provision"]])
+        elif "nodes" in arguments:
+            for node in arguments["nodes"]:
+                cmd_args.extend(["--node", node])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "✅ **Preflight Validation**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "price_discovery":
+        cmd_args = ["price-discovery", "--gpu-type", arguments["gpu_type"]]
+        if "region" in arguments:
+            cmd_args.extend(["--region", arguments["region"]])
+        if "hours" in arguments:
+            cmd_args.extend(["--hours", str(arguments["hours"])])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = f"💰 **Price Discovery — {arguments['gpu_type']}**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
     elif tool_name == "gitops_init":
         repo = arguments["repo"]
         tool = arguments.get("tool", "argocd")
@@ -2289,7 +2452,7 @@ def create_sse_app() -> "Starlette":
         )
 
     async def health(request: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok", "server": "terradev-mcp", "version": "1.4.0"})
+        return JSONResponse({"status": "ok", "server": "terradev-mcp", "version": "1.6.0"})
 
     # SSE handler wraps the MCP server
     class SseHandler:
@@ -2315,7 +2478,7 @@ def create_sse_app() -> "Starlette":
                     streams[1],
                     InitializationOptions(
                         server_name="terradev-mcp",
-                        server_version="1.4.0",
+                        server_version="1.6.0",
                         capabilities=self._server.get_capabilities(
                             notification_options=NotificationOptions(),
                             experimental_capabilities=None,
@@ -2358,7 +2521,7 @@ async def run_stdio():
             write_stream,
             InitializationOptions(
                 server_name="terradev-mcp",
-                server_version="1.4.0",
+                server_version="1.6.0",
                 capabilities=server.get_capabilities(
                     notification_options=None,
                     experimental_capabilities=None,

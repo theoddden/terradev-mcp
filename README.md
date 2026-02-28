@@ -1,4 +1,4 @@
-# Terradev MCP Server v1.5.0
+# Terradev MCP Server v1.5.1
 
 GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NIXL KV transfer, and Terraform-powered parallel GPU provisioning** across 15 cloud providers.
 
@@ -6,7 +6,7 @@ GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NI
   <img src="https://raw.githubusercontent.com/theoddden/terradev-mcp/main/demo/terradev-mcp-demo.gif" alt="Terradev MCP Demo" width="800">
 </p>
 
-## What's New in v1.5.0
+## What's New in v1.5
 
 - **Ray Serve LLM Integration**: Wide Expert Parallelism (EP) and disaggregated Prefill/Decode deployment via Ray Serve
 - **Expert Parallelism (EP)**: Distribute MoE experts across GPUs with EPLB load balancing and Dual-Batch Overlap
@@ -133,7 +133,7 @@ The Terradev MCP server provides 20+ tools for complete GPU cloud management:
 - **`inferx_optimize`** - Get cost analysis for inference endpoints
 - **`hf_space_deploy`** - Deploy models to HuggingFace Spaces
 
-### MoE Expert Parallelism (NEW in v1.5.0)
+### MoE Expert Parallelism (NEW in v1.5)
 - **`deploy_wide_ep`** - Deploy MoE model with Wide-EP across multiple GPUs via Ray Serve LLM
 - **`deploy_pd`** - Deploy disaggregated Prefill/Decode serving with NIXL KV transfer
 - **`ep_group_status`** - Health check EP groups (all ranks must be healthy for all-to-all)
@@ -348,9 +348,9 @@ resource "terradev_instance" "gpu" {
 }
 ```
 
-## MoE Serving Architecture (v1.5.0)
+## MoE Serving Architecture (v1.5)
 
-Terradev v1.5.0 integrates the full MoE serving stack:
+Terradev v1.5 integrates the full MoE serving stack:
 
 | Component | What it does | Terradev integration |
 |-----------|-------------|---------------------|
@@ -401,5 +401,5 @@ Full multi-cloud setup:
 
 - [GitHub](https://github.com/theoddden/Terradev)
 - [PyPI](https://pypi.org/project/terradev-cli/) (v3.3.0)
-- [NPM](https://www.npmjs.com/package/terradev-mcp) (v1.5.0)
+- [NPM](https://www.npmjs.com/package/terradev-mcp) (v1.5.1)
 - [Docs](https://theodden.github.io/Terradev/)

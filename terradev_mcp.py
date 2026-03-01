@@ -20,6 +20,10 @@ import sys
 import tempfile
 import time
 import shutil
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None  # type: ignore[assignment]
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, parse_qs, urlparse
 
@@ -292,6 +296,27 @@ async def execute_terradev_command(args: List[str]) -> Dict[str, Any]:
             "stderr": f"❌ Unexpected error: {str(e)}",
             "returncode": -1
         }
+
+async def execute_shell_command(cmd: str, timeout: int = 120) -> Dict[str, Any]:
+    """Execute a raw shell command (e.g. SSH) and return stdout/stderr/success."""
+    try:
+        process = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        return {
+            "success": process.returncode == 0,
+            "stdout": stdout.decode().strip(),
+            "stderr": stderr_bytes.decode().strip(),
+            "returncode": process.returncode,
+        }
+    except asyncio.TimeoutError:
+        return {"success": False, "stdout": "", "stderr": f"Command timed out after {timeout}s", "returncode": -1}
+    except Exception as e:
+        return {"success": False, "stdout": "", "stderr": str(e), "returncode": -1}
+
 
 def enhance_error_message(stderr: str, args: List[str]) -> str:
     """Add helpful guidance to error messages."""
@@ -1913,6 +1938,580 @@ async def handle_list_tools() -> ListToolsResult:
                 "required": ["endpoint", "name"]
             }
         ),
+
+        # ── v4.0.0: ML Services — Ray ──────────────────────────────────────
+
+        Tool(
+            name="ray_status",
+            description="Get Ray cluster status including node count, resources, memory, and running jobs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "detailed": {"type": "boolean", "description": "Include detailed memory and resource info", "default": True}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="ray_start",
+            description="Start a Ray cluster (head node or worker). For distributed ML training and inference.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "head": {"type": "boolean", "description": "Start as head node (true) or worker (false)", "default": True},
+                    "port": {"type": "integer", "description": "Ray head port", "default": 6379},
+                    "num_gpus": {"type": "integer", "description": "Number of GPUs to expose"},
+                    "head_address": {"type": "string", "description": "Head node address for worker nodes (e.g. 10.0.0.1:6379)"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="ray_stop",
+            description="Stop the Ray cluster on the current node.",
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
+            name="ray_submit_job",
+            description="Submit a job script to the Ray cluster for distributed execution.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "script": {"type": "string", "description": "Path to the Python script to submit"},
+                    "job_name": {"type": "string", "description": "Optional job name"},
+                    "num_gpus": {"type": "integer", "description": "GPU resources to request"},
+                    "num_cpus": {"type": "integer", "description": "CPU resources to request"}
+                },
+                "required": ["script"]
+            }
+        ),
+        Tool(
+            name="ray_list_jobs",
+            description="List all running Ray jobs and tasks.",
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
+            name="ray_wide_ep_deploy",
+            description="Generate a Ray Serve LLM Wide-EP (Expert Parallel) deployment for MoE models. Returns Python script and config for distributed MoE serving with EPLB and DeepEP.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID (e.g. zai-org/GLM-5-FP8, deepseek-ai/DeepSeek-V3)"},
+                    "tp_size": {"type": "integer", "description": "Tensor parallel size per EP rank", "default": 1},
+                    "dp_size": {"type": "integer", "description": "Data parallel / EP degree", "default": 8},
+                    "gpu_memory_utilization": {"type": "number", "description": "GPU memory fraction", "default": 0.85},
+                    "max_model_len": {"type": "integer", "description": "Max sequence length", "default": 32768},
+                    "generate_script": {"type": "boolean", "description": "Also generate executable Python script", "default": True}
+                },
+                "required": ["model_id"]
+            }
+        ),
+        Tool(
+            name="ray_disagg_pd_deploy",
+            description="Generate a Ray Serve LLM disaggregated Prefill/Decode deployment. Splits inference into compute-bound prefill and memory-bound decode phases with KV cache transfer via NIXL.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID"},
+                    "prefill_tp": {"type": "integer", "description": "Prefill tensor parallel size", "default": 1},
+                    "prefill_dp": {"type": "integer", "description": "Prefill data parallel size", "default": 4},
+                    "decode_tp": {"type": "integer", "description": "Decode tensor parallel size", "default": 1},
+                    "decode_dp": {"type": "integer", "description": "Decode data parallel size", "default": 4},
+                    "kv_connector": {"type": "string", "description": "KV transfer connector", "enum": ["NixlConnector", "LMCacheConnector"], "default": "NixlConnector"},
+                    "generate_script": {"type": "boolean", "description": "Also generate executable Python script", "default": True}
+                },
+                "required": ["model_id"]
+            }
+        ),
+        Tool(
+            name="ray_parallelism_strategy",
+            description="Compute optimal TP/DP/EP parallelism strategy for a given MoE model and GPU count. Returns recommended configuration with rationale.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID (e.g. zai-org/GLM-5-FP8)"},
+                    "gpu_count": {"type": "integer", "description": "Number of available GPUs", "default": 8},
+                    "gpu_memory_gb": {"type": "number", "description": "GPU memory per device in GB", "default": 80.0}
+                },
+                "required": ["model_id"]
+            }
+        ),
+
+        # ── v4.0.0: ML Services — vLLM Lifecycle ──────────────────────────
+
+        Tool(
+            name="vllm_start",
+            description="Start a vLLM inference server on a remote instance via SSH/systemd. Supports Multi-LoRA, Sleep Mode, KV Offloading, Speculative Decoding.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "instance_ip": {"type": "string", "description": "Target instance IP"},
+                    "model": {"type": "string", "description": "HuggingFace model ID"},
+                    "port": {"type": "integer", "description": "Server port", "default": 8000},
+                    "tp_size": {"type": "integer", "description": "Tensor parallel size", "default": 1},
+                    "gpu_memory_utilization": {"type": "number", "description": "GPU memory fraction", "default": 0.9},
+                    "ssh_user": {"type": "string", "description": "SSH user", "default": "root"},
+                    "ssh_key": {"type": "string", "description": "Path to SSH private key"},
+                    "api_key": {"type": "string", "description": "vLLM API key to set"}
+                },
+                "required": ["instance_ip", "model"]
+            }
+        ),
+        Tool(
+            name="vllm_stop",
+            description="Stop a vLLM server on a remote instance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "instance_ip": {"type": "string", "description": "Target instance IP"},
+                    "ssh_user": {"type": "string", "description": "SSH user", "default": "root"},
+                    "ssh_key": {"type": "string", "description": "Path to SSH private key"}
+                },
+                "required": ["instance_ip"]
+            }
+        ),
+        Tool(
+            name="vllm_inference",
+            description="Test inference against a running vLLM endpoint (completions or chat).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "vLLM endpoint URL (e.g. http://10.0.0.1:8000)"},
+                    "prompt": {"type": "string", "description": "Prompt text (for completions mode)"},
+                    "messages": {"type": "array", "description": "Chat messages array (for chat mode)", "items": {"type": "object"}},
+                    "model": {"type": "string", "description": "Model name to use"},
+                    "max_tokens": {"type": "integer", "description": "Max tokens to generate", "default": 100},
+                    "api_key": {"type": "string", "description": "vLLM API key"}
+                },
+                "required": ["endpoint", "model"]
+            }
+        ),
+        Tool(
+            name="vllm_info",
+            description="Get vLLM server info: loaded models, config, and health status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "vLLM endpoint URL (e.g. http://10.0.0.1:8000)"},
+                    "api_key": {"type": "string", "description": "vLLM API key"}
+                },
+                "required": ["endpoint"]
+            }
+        ),
+        Tool(
+            name="vllm_sleep",
+            description="Put a vLLM server to sleep. Level 1: offload to CPU (fast wake). Level 2: discard weights (minimal RAM).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "vLLM endpoint URL"},
+                    "level": {"type": "integer", "description": "Sleep level (1=CPU offload, 2=discard)", "default": 1, "enum": [1, 2]}
+                },
+                "required": ["endpoint"]
+            }
+        ),
+        Tool(
+            name="vllm_wake",
+            description="Wake a sleeping vLLM server. For Level 2 sleep, also reloads weights and resets prefix cache.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "vLLM endpoint URL"},
+                    "sleep_level": {"type": "integer", "description": "The sleep level the server is at (affects wake procedure)", "default": 1}
+                },
+                "required": ["endpoint"]
+            }
+        ),
+
+        # ── v4.0.0: ML Services — SGLang ──────────────────────────────────
+
+        Tool(
+            name="sglang_start",
+            description="Start an SGLang inference server on a remote instance. Supports MoE Expert Parallelism, EPLB, DBO.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "instance_ip": {"type": "string", "description": "Target instance IP"},
+                    "model": {"type": "string", "description": "HuggingFace model ID"},
+                    "port": {"type": "integer", "description": "Server port", "default": 8000},
+                    "tp_size": {"type": "integer", "description": "Tensor parallel size", "default": 1},
+                    "dp_size": {"type": "integer", "description": "Data parallel size", "default": 8},
+                    "enable_expert_parallel": {"type": "boolean", "description": "Enable MoE Expert Parallelism", "default": False},
+                    "ssh_user": {"type": "string", "description": "SSH user", "default": "root"},
+                    "ssh_key": {"type": "string", "description": "Path to SSH private key"}
+                },
+                "required": ["instance_ip", "model"]
+            }
+        ),
+        Tool(
+            name="sglang_stop",
+            description="Stop an SGLang server on a remote instance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "instance_ip": {"type": "string", "description": "Target instance IP"},
+                    "ssh_user": {"type": "string", "description": "SSH user", "default": "root"},
+                    "ssh_key": {"type": "string", "description": "Path to SSH private key"}
+                },
+                "required": ["instance_ip"]
+            }
+        ),
+        Tool(
+            name="sglang_inference",
+            description="Test inference against a running SGLang endpoint (completions or chat).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "SGLang endpoint URL (e.g. http://10.0.0.1:8000)"},
+                    "prompt": {"type": "string", "description": "Prompt text (for completions mode)"},
+                    "messages": {"type": "array", "description": "Chat messages array (for chat mode)", "items": {"type": "object"}},
+                    "model": {"type": "string", "description": "Model name to use"},
+                    "max_tokens": {"type": "integer", "description": "Max tokens to generate", "default": 100},
+                    "api_key": {"type": "string", "description": "API key"}
+                },
+                "required": ["endpoint", "model"]
+            }
+        ),
+        Tool(
+            name="sglang_metrics",
+            description="Get SGLang server metrics from the Prometheus /metrics endpoint. Returns throughput, latency, and queue depth.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "SGLang endpoint URL (e.g. http://10.0.0.1:8000)"}
+                },
+                "required": ["endpoint"]
+            }
+        ),
+
+        # ── v4.0.0: ML Services — Ollama ──────────────────────────────────
+
+        Tool(
+            name="ollama_list",
+            description="List models available on an Ollama server.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "Ollama endpoint URL", "default": "http://localhost:11434"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="ollama_pull",
+            description="Pull a model to an Ollama server on a remote instance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model": {"type": "string", "description": "Model name (e.g. llama3.2, deepseek-r1, codellama)"},
+                    "instance_ip": {"type": "string", "description": "Target instance IP"},
+                    "ssh_user": {"type": "string", "description": "SSH user", "default": "root"},
+                    "ssh_key": {"type": "string", "description": "Path to SSH private key"}
+                },
+                "required": ["model", "instance_ip"]
+            }
+        ),
+        Tool(
+            name="ollama_generate",
+            description="Generate text using an Ollama model (non-chat completions).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "Ollama endpoint URL", "default": "http://localhost:11434"},
+                    "model": {"type": "string", "description": "Model name"},
+                    "prompt": {"type": "string", "description": "Prompt text"}
+                },
+                "required": ["model", "prompt"]
+            }
+        ),
+        Tool(
+            name="ollama_chat",
+            description="Chat with an Ollama model using the chat/completions API.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "Ollama endpoint URL", "default": "http://localhost:11434"},
+                    "model": {"type": "string", "description": "Model name"},
+                    "messages": {"type": "array", "description": "Chat messages [{role, content}]", "items": {"type": "object"}}
+                },
+                "required": ["model", "messages"]
+            }
+        ),
+        Tool(
+            name="ollama_model_info",
+            description="Get detailed information about an Ollama model (parameters, template, license).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "Ollama endpoint URL", "default": "http://localhost:11434"},
+                    "model": {"type": "string", "description": "Model name"}
+                },
+                "required": ["model"]
+            }
+        ),
+
+        # ── v4.0.0: ML Services — Weights & Biases ───────────────────────
+
+        Tool(
+            name="wandb_list_projects",
+            description="List all Weights & Biases projects for the configured entity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "entity": {"type": "string", "description": "W&B entity (team/username)"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="wandb_list_runs",
+            description="List runs in a W&B project with status, metrics summary, and config.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "entity": {"type": "string", "description": "W&B entity"},
+                    "project": {"type": "string", "description": "W&B project name"},
+                    "limit": {"type": "integer", "description": "Max runs to return", "default": 50}
+                },
+                "required": ["api_key", "project"]
+            }
+        ),
+        Tool(
+            name="wandb_run_details",
+            description="Get detailed info, metrics, and artifacts for a specific W&B run.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "run_id": {"type": "string", "description": "W&B run ID"}
+                },
+                "required": ["api_key", "run_id"]
+            }
+        ),
+
+        # ── v4.0.0: ML Services — LangSmith ──────────────────────────────
+
+        Tool(
+            name="langsmith_list_runs",
+            description="List LangSmith runs with tracing data. Optionally correlate with Terradev GPU cost metrics.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "LangSmith API key"},
+                    "project": {"type": "string", "description": "LangSmith project name"},
+                    "limit": {"type": "integer", "description": "Max runs", "default": 50},
+                    "correlate_gpu": {"type": "boolean", "description": "Join with cost_tracking.db for cost-per-run", "default": False}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="langsmith_list_projects",
+            description="List LangSmith projects.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "LangSmith API key"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="langsmith_gpu_correlate",
+            description="Correlate LangSmith runs with Terradev GPU provisioning data. Returns cost-per-run, GPU utilization, and provider breakdown.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "LangSmith API key"},
+                    "project": {"type": "string", "description": "LangSmith project name"},
+                    "days": {"type": "integer", "description": "Lookback period in days", "default": 7}
+                },
+                "required": ["api_key"]
+            }
+        ),
+
+        # ── v4.0.0: ML Services — MLflow ─────────────────────────────────
+
+        Tool(
+            name="mlflow_list_experiments",
+            description="List MLflow experiments on the configured tracking server.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tracking_uri": {"type": "string", "description": "MLflow tracking server URI"},
+                    "username": {"type": "string", "description": "Basic auth username"},
+                    "password": {"type": "string", "description": "Basic auth password"}
+                },
+                "required": ["tracking_uri"]
+            }
+        ),
+        Tool(
+            name="mlflow_log_run",
+            description="Log a Terradev training run to MLflow with auto-injected GPU type, provider, cost/hr, and duration as params.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tracking_uri": {"type": "string", "description": "MLflow tracking server URI"},
+                    "experiment_name": {"type": "string", "description": "MLflow experiment name"},
+                    "run_name": {"type": "string", "description": "Run display name"},
+                    "gpu_type": {"type": "string", "description": "GPU type used (e.g. H100)"},
+                    "provider": {"type": "string", "description": "Cloud provider"},
+                    "cost_per_hour": {"type": "number", "description": "Cost per hour in USD"},
+                    "duration_seconds": {"type": "number", "description": "Training duration in seconds"},
+                    "metrics": {"type": "object", "description": "Additional metrics to log"},
+                    "username": {"type": "string", "description": "Basic auth username"},
+                    "password": {"type": "string", "description": "Basic auth password"}
+                },
+                "required": ["tracking_uri", "experiment_name", "run_name"]
+            }
+        ),
+        Tool(
+            name="mlflow_register_model",
+            description="Register a trained model in the MLflow model registry with Terradev provenance tags.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tracking_uri": {"type": "string", "description": "MLflow tracking server URI"},
+                    "model_name": {"type": "string", "description": "Model registry name"},
+                    "run_id": {"type": "string", "description": "MLflow run ID that produced the model"},
+                    "model_uri": {"type": "string", "description": "Model artifact URI (e.g. runs:/<run_id>/model)"},
+                    "tags": {"type": "object", "description": "Additional tags to set on the model version"},
+                    "username": {"type": "string", "description": "Basic auth username"},
+                    "password": {"type": "string", "description": "Basic auth password"}
+                },
+                "required": ["tracking_uri", "model_name", "run_id"]
+            }
+        ),
+
+        # ── v4.0.0: ML Services — DVC ────────────────────────────────────
+
+        Tool(
+            name="dvc_status",
+            description="Get DVC repository status: tracked files, remotes, and changes since last commit.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Path to the DVC repository"}
+                },
+                "required": ["repo_path"]
+            }
+        ),
+        Tool(
+            name="dvc_diff",
+            description="Show DVC diff between two revisions (e.g. training checkpoints). Shows added, modified, deleted files.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Path to the DVC repository"},
+                    "rev_a": {"type": "string", "description": "Base revision (git ref)"},
+                    "rev_b": {"type": "string", "description": "Target revision (git ref, default: HEAD)"}
+                },
+                "required": ["repo_path"]
+            }
+        ),
+        Tool(
+            name="dvc_stage_checkpoint",
+            description="Atomic checkpoint staging: DVC add + push + git commit in one operation. Promotes a training checkpoint to versioned storage.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Path to the DVC repository"},
+                    "checkpoint_path": {"type": "string", "description": "Path to the checkpoint file/directory to stage"},
+                    "message": {"type": "string", "description": "Git commit message", "default": "Stage checkpoint via Terradev"},
+                    "remote": {"type": "string", "description": "DVC remote name to push to"}
+                },
+                "required": ["repo_path", "checkpoint_path"]
+            }
+        ),
+        Tool(
+            name="dvc_push",
+            description="Push DVC-tracked data to the configured remote storage.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {"type": "string", "description": "Path to the DVC repository"},
+                    "remote": {"type": "string", "description": "DVC remote name (optional, uses default)"}
+                },
+                "required": ["repo_path"]
+            }
+        ),
+
+        # ── v4.0.0: ML Services — KServe ─────────────────────────────────
+
+        Tool(
+            name="kserve_generate_yaml",
+            description="Generate a GPU-aware KServe InferenceService YAML manifest with NUMA pinning, resource limits derived from model size and VRAM, and topology hints.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_name": {"type": "string", "description": "Model name for the InferenceService"},
+                    "model_uri": {"type": "string", "description": "Model storage URI (e.g. s3://bucket/model or gs://bucket/model)"},
+                    "gpu_type": {"type": "string", "description": "GPU type (e.g. A100, H100)"},
+                    "gpu_count": {"type": "integer", "description": "Number of GPUs", "default": 1},
+                    "namespace": {"type": "string", "description": "Kubernetes namespace", "default": "default"},
+                    "runtime": {"type": "string", "description": "Serving runtime", "enum": ["vllm", "triton", "huggingface"], "default": "vllm"},
+                    "min_replicas": {"type": "integer", "description": "Min replicas for autoscaling", "default": 1},
+                    "max_replicas": {"type": "integer", "description": "Max replicas for autoscaling", "default": 3}
+                },
+                "required": ["model_name", "model_uri", "gpu_type"]
+            }
+        ),
+        Tool(
+            name="kserve_list",
+            description="List KServe InferenceServices in a Kubernetes namespace.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "namespace": {"type": "string", "description": "Kubernetes namespace", "default": "default"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="kserve_status",
+            description="Get detailed status of a KServe InferenceService including readiness, traffic split, and URL.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "InferenceService name"},
+                    "namespace": {"type": "string", "description": "Kubernetes namespace", "default": "default"}
+                },
+                "required": ["name"]
+            }
+        ),
+
+        # ── v4.0.0: Egress Optimizer ─────────────────────────────────────
+
+        Tool(
+            name="egress_cheapest_route",
+            description="Find the cheapest egress route between cloud providers/regions for model weights or dataset transfer. Supports multi-hop routing.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_provider": {"type": "string", "description": "Source cloud provider (e.g. aws, gcp, azure)"},
+                    "source_region": {"type": "string", "description": "Source region (e.g. us-east-1)"},
+                    "dest_provider": {"type": "string", "description": "Destination cloud provider"},
+                    "dest_region": {"type": "string", "description": "Destination region"},
+                    "size_gb": {"type": "number", "description": "Transfer size in GB"}
+                },
+                "required": ["source_provider", "source_region", "dest_provider", "dest_region", "size_gb"]
+            }
+        ),
+        Tool(
+            name="egress_optimize_staging",
+            description="Optimize dataset or model staging across regions by finding the cheapest transfer plan. Integrates with the dataset stager for parallel uploads.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_uri": {"type": "string", "description": "Source data URI (s3://, gs://, local path, or HF dataset ID)"},
+                    "target_regions": {"type": "array", "description": "Target regions as provider:region strings", "items": {"type": "string"}},
+                    "size_gb": {"type": "number", "description": "Approximate data size in GB"}
+                },
+                "required": ["source_uri", "target_regions", "size_gb"]
+            }
+        ),
     ]
     
     return ListToolsResult(tools=tools)
@@ -2000,6 +2599,48 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         "lora_list": ["lora", "list"],
         "lora_add": ["lora", "add"],
         "lora_remove": ["lora", "remove"],
+        # v4.0.0: ML Services — handled by custom elif blocks below
+        "ray_status": ["ml", "ray", "status"],
+        "ray_start": ["ml", "ray", "start"],
+        "ray_stop": ["ml", "ray", "stop"],
+        "ray_submit_job": ["ml", "ray", "submit"],
+        "ray_list_jobs": ["ml", "ray", "jobs"],
+        "ray_wide_ep_deploy": ["ml", "ray", "wide-ep"],
+        "ray_disagg_pd_deploy": ["ml", "ray", "disagg-pd"],
+        "ray_parallelism_strategy": ["ml", "ray", "parallelism"],
+        "vllm_start": ["ml", "vllm", "start"],
+        "vllm_stop": ["ml", "vllm", "stop"],
+        "vllm_inference": ["ml", "vllm", "inference"],
+        "vllm_info": ["ml", "vllm", "info"],
+        "vllm_sleep": ["ml", "vllm", "sleep"],
+        "vllm_wake": ["ml", "vllm", "wake"],
+        "sglang_start": ["ml", "sglang", "start"],
+        "sglang_stop": ["ml", "sglang", "stop"],
+        "sglang_inference": ["ml", "sglang", "inference"],
+        "sglang_metrics": ["ml", "sglang", "metrics"],
+        "ollama_list": ["ml", "ollama", "list"],
+        "ollama_pull": ["ml", "ollama", "pull"],
+        "ollama_generate": ["ml", "ollama", "generate"],
+        "ollama_chat": ["ml", "ollama", "chat"],
+        "ollama_model_info": ["ml", "ollama", "info"],
+        "wandb_list_projects": ["ml", "wandb", "projects"],
+        "wandb_list_runs": ["ml", "wandb", "runs"],
+        "wandb_run_details": ["ml", "wandb", "run-details"],
+        "langsmith_list_runs": ["ml", "langsmith", "runs"],
+        "langsmith_list_projects": ["ml", "langsmith", "projects"],
+        "langsmith_gpu_correlate": ["ml", "langsmith", "gpu-correlate"],
+        "mlflow_list_experiments": ["ml", "mlflow", "experiments"],
+        "mlflow_log_run": ["ml", "mlflow", "log-run"],
+        "mlflow_register_model": ["ml", "mlflow", "register"],
+        "dvc_status": ["ml", "dvc", "status"],
+        "dvc_diff": ["ml", "dvc", "diff"],
+        "dvc_stage_checkpoint": ["ml", "dvc", "stage"],
+        "dvc_push": ["ml", "dvc", "push"],
+        "kserve_generate_yaml": ["ml", "kserve", "generate"],
+        "kserve_list": ["ml", "kserve", "list"],
+        "kserve_status": ["ml", "kserve", "status"],
+        "egress_cheapest_route": ["egress", "route"],
+        "egress_optimize_staging": ["egress", "optimize"],
     }
     
     if tool_name not in command_map:
@@ -3339,6 +3980,892 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         else:
             output_text += "No active workloads. Start with `quote_gpu` to compare prices, then `provision_gpu` or `up`."
         return CallToolResult(content=[TextContent(type="text", text=output_text)])
+
+    # ── v4.0.0 Handlers: ML Services ────────────────────────────────────
+
+    elif tool_name == "ray_status":
+        cmd = ["ray", "status"]
+        if arguments.get("detailed", True):
+            cmd.append("--details")
+        try:
+            result = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=15)
+            output = stdout.decode() if result.returncode == 0 else stderr.decode()
+            output_text = "🔵 **Ray Cluster Status**\n\n"
+            if result.returncode == 0:
+                output_text += output
+            else:
+                output_text += f"⚠️ {output}\n\n💡 Start a cluster with `ray_start`."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=result.returncode != 0)
+        except FileNotFoundError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Ray not installed. Run: `pip install ray[default]`")], isError=True)
+        except asyncio.TimeoutError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Ray status timed out.")], isError=True)
+
+    elif tool_name == "ray_start":
+        head = arguments.get("head", True)
+        port = arguments.get("port", 6379)
+        if head:
+            cmd = ["ray", "start", "--head", "--port", str(port), "--dashboard-host", "0.0.0.0"]
+            if arguments.get("num_gpus"):
+                cmd.extend(["--num-gpus", str(arguments["num_gpus"])])
+        else:
+            addr = arguments.get("head_address", f"localhost:{port}")
+            cmd = ["ray", "start", "--address", addr]
+        try:
+            result = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=30)
+            output = stdout.decode() if result.returncode == 0 else stderr.decode()
+            mode = "head" if head else "worker"
+            if result.returncode == 0:
+                output_text = f"✅ **Ray {mode} node started**\n\n{output}\n\n"
+                output_text += "**suggest_action:** Check cluster with `ray_status`. Submit jobs with `ray_submit_job`."
+            else:
+                output_text = f"❌ **Failed to start Ray {mode} node**\n\n{output}"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=result.returncode != 0)
+        except FileNotFoundError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Ray not installed. Run: `pip install ray[default]`")], isError=True)
+
+    elif tool_name == "ray_stop":
+        try:
+            result = await asyncio.create_subprocess_exec(
+                "ray", "stop", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=15)
+            output = stdout.decode()
+            return CallToolResult(content=[TextContent(type="text", text=f"⏹️ **Ray Cluster Stopped**\n\n{output}")])
+        except FileNotFoundError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Ray not installed.")], isError=True)
+
+    elif tool_name == "ray_submit_job":
+        script = arguments["script"]
+        cmd = ["ray", "job", "submit", "--", "python", script]
+        if arguments.get("job_name"):
+            cmd = ["ray", "job", "submit", "--submission-id", arguments["job_name"], "--", "python", script]
+        try:
+            result = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=60)
+            output = stdout.decode() if result.returncode == 0 else stderr.decode()
+            if result.returncode == 0:
+                output_text = f"🚀 **Ray Job Submitted**\n\n**Script:** {script}\n\n{output}\n\n"
+                output_text += "**suggest_action:** Monitor with `ray_list_jobs` or check dashboard with `ray_status`."
+            else:
+                output_text = f"❌ **Job submission failed**\n\n{output}"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=result.returncode != 0)
+        except FileNotFoundError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Ray not installed.")], isError=True)
+
+    elif tool_name == "ray_list_jobs":
+        try:
+            result = await asyncio.create_subprocess_exec(
+                "ray", "job", "list", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=15)
+            output = stdout.decode() if result.returncode == 0 else stderr.decode()
+            output_text = "📋 **Ray Jobs**\n\n" + (output or "No jobs found.")
+            return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=result.returncode != 0)
+        except FileNotFoundError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Ray not installed.")], isError=True)
+
+    elif tool_name == "ray_wide_ep_deploy":
+        # Use EnhancedRayService to generate Wide-EP config
+        model_id = arguments["model_id"]
+        tp = arguments.get("tp_size", 1)
+        dp = arguments.get("dp_size", 8)
+        mem_util = arguments.get("gpu_memory_utilization", 0.85)
+        max_len = arguments.get("max_model_len", 32768)
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.ray_enhanced import EnhancedRayService, EnhancedRayConfig
+            svc = EnhancedRayService(EnhancedRayConfig(
+                model_id=model_id, tp_size=tp, dp_size=dp,
+                gpu_memory_utilization=mem_util, max_model_len=max_len
+            ))
+            config = svc.generate_wide_ep_deployment(model_id, tp, dp, mem_util, max_len)
+            output_text = f"🧬 **Wide-EP Deployment Config — {model_id}**\n\n"
+            output_text += f"**Pattern:** Wide Expert Parallelism\n"
+            output_text += f"**TP:** {config['engine_config']['tensor_parallel_size']}, **DP:** {config['engine_config']['data_parallel_size']}\n"
+            output_text += f"**Experts/rank:** {config['model_profile']['experts_per_rank']}\n"
+            output_text += f"**EPLB:** {config['engine_config']['enable_eplb']}, **DBO:** {config['engine_config']['enable_dbo']}\n\n"
+            output_text += f"**Engine Config:**\n```json\n{json.dumps(config['engine_config'], indent=2)}\n```\n\n"
+            output_text += f"**Env Vars:**\n```json\n{json.dumps(config['env_vars'], indent=2)}\n```\n"
+            if arguments.get("generate_script", True):
+                script = svc.generate_wide_ep_script(model_id, tp, dp)
+                output_text += f"\n**Executable Script:**\n```python\n{script}\n```\n"
+            output_text += "\n**suggest_action:** Save the script and run it on a Ray cluster with `ray_submit_job`."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found in path. Ensure terradev_cli is installed.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ Wide-EP generation failed: {e}")], isError=True)
+
+    elif tool_name == "ray_disagg_pd_deploy":
+        model_id = arguments["model_id"]
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.ray_enhanced import EnhancedRayService, EnhancedRayConfig
+            svc = EnhancedRayService(EnhancedRayConfig(
+                model_id=model_id,
+                prefill_tp=arguments.get("prefill_tp", 1), prefill_dp=arguments.get("prefill_dp", 4),
+                decode_tp=arguments.get("decode_tp", 1), decode_dp=arguments.get("decode_dp", 4),
+                kv_connector=arguments.get("kv_connector", "NixlConnector"),
+            ))
+            config = svc.generate_disaggregated_pd_deployment(model_id)
+            pc = config["prefill_config"]
+            dc = config["decode_config"]
+            output_text = f"⚡ **Disaggregated P/D Deployment — {model_id}**\n\n"
+            output_text += f"**Prefill:** TP={pc['tensor_parallel_size']}, DP={pc['data_parallel_size']} (compute-bound)\n"
+            output_text += f"**Decode:** TP={dc['tensor_parallel_size']}, DP={dc['data_parallel_size']} (memory-bound)\n"
+            output_text += f"**KV Connector:** {config['kv_connector']['type']}\n\n"
+            output_text += f"**Config:**\n```json\n{json.dumps(config, indent=2, default=str)}\n```\n"
+            if arguments.get("generate_script", True):
+                script = svc.generate_disaggregated_pd_script(model_id)
+                output_text += f"\n**Executable Script:**\n```python\n{script}\n```\n"
+            output_text += "\n**suggest_action:** Deploy on a Ray cluster: save the script, then `ray_submit_job`."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ Disagg P/D generation failed: {e}")], isError=True)
+
+    elif tool_name == "ray_parallelism_strategy":
+        model_id = arguments["model_id"]
+        gpu_count = arguments.get("gpu_count", 8)
+        gpu_mem = arguments.get("gpu_memory_gb", 80.0)
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.ray_enhanced import EnhancedRayService, EnhancedRayConfig
+            svc = EnhancedRayService(EnhancedRayConfig(model_id=model_id, gpu_count=gpu_count))
+            strategy = svc.compute_parallelism_strategy(gpu_count, gpu_mem)
+            output_text = f"🧠 **Parallelism Strategy — {model_id}**\n\n"
+            output_text += f"**Model:** {strategy['total_params_b']}B params ({strategy['active_params_b']}B active), {strategy['num_experts']} experts\n"
+            output_text += f"**Weight:** {strategy['total_weight_gb']}GB total, {strategy['active_memory_gb']}GB active\n"
+            output_text += f"**GPUs:** {strategy['gpu_count']}× {gpu_mem}GB\n\n"
+            output_text += f"**Recommended:** TP={strategy['recommended_tp']}, DP={strategy['recommended_dp']}\n"
+            output_text += f"**Expert Parallel:** {strategy['expert_parallel']} ({strategy['experts_per_rank']} experts/rank)\n"
+            output_text += f"**EPLB:** {strategy['eplb_enabled']}\n\n"
+            output_text += f"**Rationale:** {strategy['rationale']}\n\n"
+            output_text += "**suggest_action:** Apply with `ray_wide_ep_deploy` or `moe_deploy`."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ Strategy computation failed: {e}")], isError=True)
+
+    # ── vLLM Lifecycle Handlers ──────────────────────────────────────────
+
+    elif tool_name == "vllm_start":
+        ip = arguments["instance_ip"]
+        model = arguments["model"]
+        port = arguments.get("port", 8000)
+        tp = arguments.get("tp_size", 1)
+        mem = arguments.get("gpu_memory_utilization", 0.9)
+        user = arguments.get("ssh_user", "root")
+        key = arguments.get("ssh_key")
+        api_key = arguments.get("api_key")
+        cmd_parts = ["vllm", "serve", model, "--host", "0.0.0.0", "--port", str(port),
+                      "--gpu-memory-utilization", str(mem), "--tensor-parallel-size", str(tp),
+                      "--enable-sleep-mode", "--kv-connector", "offloading"]
+        if api_key:
+            cmd_parts.extend(["--api-key", api_key])
+        exec_line = " ".join(cmd_parts)
+        service = f"""[Unit]\nDescription=vLLM {model}\nAfter=network.target\n[Service]\nType=simple\nExecStart={exec_line}\nRestart=always\nRestartSec=10\nEnvironment=VLLM_SERVER_DEV_MODE=1\n[Install]\nWantedBy=multi-user.target"""
+        setup = f"echo '{service}' > /etc/systemd/system/vllm.service && systemctl daemon-reload && systemctl enable vllm && systemctl start vllm && sleep 5 && systemctl status vllm"
+        ssh_base = f"ssh -o StrictHostKeyChecking=no{' -i ' + key if key else ''} {user}@{ip}"
+        full_cmd = f"{ssh_base} '{setup}'"
+        result = await execute_shell_command(full_cmd)
+        if result["success"]:
+            output_text = f"✅ **vLLM Server Started**\n\n**Model:** {model}\n**Endpoint:** http://{ip}:{port}/v1\n**TP:** {tp}\n**Sleep Mode:** enabled\n**KV Offloading:** enabled\n\n{result['stdout']}\n\n"
+            output_text += f"**suggest_action:** Test with `vllm_inference`. Manage power with `vllm_sleep`/`vllm_wake`."
+        else:
+            output_text = f"❌ **Failed to start vLLM**\n\n{result['stderr']}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "vllm_stop":
+        ip = arguments["instance_ip"]
+        user = arguments.get("ssh_user", "root")
+        key = arguments.get("ssh_key")
+        ssh_base = f"ssh -o StrictHostKeyChecking=no{' -i ' + key if key else ''} {user}@{ip}"
+        full_cmd = f"{ssh_base} 'systemctl stop vllm && systemctl disable vllm && rm -f /etc/systemd/system/vllm.service && systemctl daemon-reload'"
+        result = await execute_shell_command(full_cmd)
+        output_text = f"⏹️ **vLLM Server Stopped** on {ip}\n\n{result['stdout']}" if result["success"] else f"❌ {result['stderr']}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "vllm_inference":
+        endpoint = arguments["endpoint"].rstrip("/")
+        model = arguments["model"]
+        max_tokens = arguments.get("max_tokens", 100)
+        api_key = arguments.get("api_key")
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        if arguments.get("messages"):
+            url = f"{endpoint}/v1/chat/completions"
+            payload = {"model": model, "messages": arguments["messages"], "max_tokens": max_tokens, "stream": False}
+        elif arguments.get("prompt"):
+            url = f"{endpoint}/v1/completions"
+            payload = {"model": model, "prompt": arguments["prompt"], "max_tokens": max_tokens, "stream": False}
+        else:
+            return CallToolResult(content=[TextContent(type="text", text="⚠️ Provide either `prompt` or `messages`.")], isError=True)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if "choices" in data and data["choices"]:
+                            if "message" in data["choices"][0]:
+                                text = data["choices"][0]["message"]["content"]
+                            else:
+                                text = data["choices"][0].get("text", "")
+                            output_text = f"⚡ **vLLM Inference — {model}**\n\n{text}\n\n"
+                            if data.get("usage"):
+                                u = data["usage"]
+                                output_text += f"**Tokens:** {u.get('prompt_tokens', '?')} in → {u.get('completion_tokens', '?')} out"
+                        else:
+                            output_text = f"⚡ **Response:**\n```json\n{json.dumps(data, indent=2)}\n```"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ vLLM returned {resp.status}: {body}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ Inference failed: {e}")], isError=True)
+
+    elif tool_name == "vllm_info":
+        endpoint = arguments["endpoint"].rstrip("/")
+        api_key = arguments.get("api_key")
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{endpoint}/v1/models", headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        models = data.get("data", [])
+                        output_text = f"ℹ️ **vLLM Server Info — {endpoint}**\n\n"
+                        output_text += f"**Models loaded:** {len(models)}\n"
+                        for m in models:
+                            parent = m.get("parent")
+                            tag = " (LoRA)" if parent else " (base)"
+                            output_text += f"  - **{m.get('id', 'unknown')}**{tag}\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ Server returned {resp.status}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "vllm_sleep":
+        endpoint = arguments["endpoint"].rstrip("/")
+        level = arguments.get("level", 1)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{endpoint}/sleep?level={level}", timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        return CallToolResult(content=[TextContent(type="text", text=f"😴 **vLLM Server Sleeping** (level {level})\n\nGPU memory freed. Wake with `vllm_wake`.")])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ Sleep failed: {resp.status} {body}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "vllm_wake":
+        endpoint = arguments["endpoint"].rstrip("/")
+        level = arguments.get("sleep_level", 1)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{endpoint}/wake_up", timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ Wake failed: {resp.status} {body}")], isError=True)
+                if level == 2:
+                    async with session.post(f"{endpoint}/collective_rpc", json={"method": "reload_weights"}, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                        if resp.status != 200:
+                            return CallToolResult(content=[TextContent(type="text", text="❌ reload_weights failed")], isError=True)
+                    async with session.post(f"{endpoint}/reset_prefix_cache", timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        pass
+                return CallToolResult(content=[TextContent(type="text", text=f"☀️ **vLLM Server Awake** (from level {level})\n\nReady for inference.")])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── SGLang Handlers ──────────────────────────────────────────────────
+
+    elif tool_name == "sglang_start":
+        ip = arguments["instance_ip"]
+        model = arguments["model"]
+        port = arguments.get("port", 8000)
+        tp = arguments.get("tp_size", 1)
+        dp = arguments.get("dp_size", 8)
+        ep = arguments.get("enable_expert_parallel", False)
+        user = arguments.get("ssh_user", "root")
+        key = arguments.get("ssh_key")
+        cmd_parts = ["python3", "-m", "sglang.launch_server", "--model-path", model,
+                      "--host", "0.0.0.0", "--port", str(port),
+                      "--tp-size", str(tp), "--dp-size", str(dp), "--trust-remote-code"]
+        if ep:
+            cmd_parts.append("--enable-expert-parallel")
+        exec_line = " ".join(cmd_parts)
+        service = f"""[Unit]\nDescription=SGLang {model}\nAfter=network.target\n[Service]\nType=simple\nExecStart={exec_line}\nRestart=always\nRestartSec=10\nEnvironment=VLLM_USE_DEEP_GEMM=1\nEnvironment=VLLM_ALL2ALL_BACKEND=deepep_low_latency\n[Install]\nWantedBy=multi-user.target"""
+        setup = f"echo '{service}' > /etc/systemd/system/sglang.service && systemctl daemon-reload && systemctl enable sglang && systemctl start sglang && sleep 5 && systemctl status sglang"
+        ssh_base = f"ssh -o StrictHostKeyChecking=no{' -i ' + key if key else ''} {user}@{ip}"
+        result = await execute_shell_command(f"{ssh_base} '{setup}'")
+        if result["success"]:
+            output_text = f"✅ **SGLang Server Started**\n\n**Model:** {model}\n**Endpoint:** http://{ip}:{port}/v1\n**TP:** {tp}, **DP:** {dp}\n**Expert Parallel:** {ep}\n\n{result['stdout']}\n\n"
+            output_text += "**suggest_action:** Test with `sglang_inference`. Check metrics with `sglang_metrics`."
+        else:
+            output_text = f"❌ **Failed to start SGLang**\n\n{result['stderr']}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "sglang_stop":
+        ip = arguments["instance_ip"]
+        user = arguments.get("ssh_user", "root")
+        key = arguments.get("ssh_key")
+        ssh_base = f"ssh -o StrictHostKeyChecking=no{' -i ' + key if key else ''} {user}@{ip}"
+        result = await execute_shell_command(f"{ssh_base} 'systemctl stop sglang && systemctl disable sglang && rm -f /etc/systemd/system/sglang.service && systemctl daemon-reload'")
+        output_text = f"⏹️ **SGLang Server Stopped** on {ip}" if result["success"] else f"❌ {result['stderr']}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "sglang_inference":
+        endpoint = arguments["endpoint"].rstrip("/")
+        model = arguments["model"]
+        max_tokens = arguments.get("max_tokens", 100)
+        api_key = arguments.get("api_key")
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        if arguments.get("messages"):
+            url = f"{endpoint}/v1/chat/completions"
+            payload = {"model": model, "messages": arguments["messages"], "max_tokens": max_tokens, "stream": False}
+        elif arguments.get("prompt"):
+            url = f"{endpoint}/v1/completions"
+            payload = {"model": model, "prompt": arguments["prompt"], "max_tokens": max_tokens, "stream": False}
+        else:
+            return CallToolResult(content=[TextContent(type="text", text="⚠️ Provide either `prompt` or `messages`.")], isError=True)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if "choices" in data and data["choices"]:
+                            if "message" in data["choices"][0]:
+                                text = data["choices"][0]["message"]["content"]
+                            else:
+                                text = data["choices"][0].get("text", "")
+                            output_text = f"⚡ **SGLang Inference — {model}**\n\n{text}\n\n"
+                            if data.get("usage"):
+                                u = data["usage"]
+                                output_text += f"**Tokens:** {u.get('prompt_tokens', '?')} in → {u.get('completion_tokens', '?')} out"
+                        else:
+                            output_text = f"⚡ **Response:**\n```json\n{json.dumps(data, indent=2)}\n```"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ SGLang returned {resp.status}: {body}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ Inference failed: {e}")], isError=True)
+
+    elif tool_name == "sglang_metrics":
+        endpoint = arguments["endpoint"].rstrip("/")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{endpoint}/metrics", timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        raw = await resp.text()
+                        output_text = f"📊 **SGLang Metrics — {endpoint}**\n\n```\n{raw[:3000]}\n```"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ Metrics endpoint returned {resp.status}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── Ollama Handlers ──────────────────────────────────────────────────
+
+    elif tool_name == "ollama_list":
+        endpoint = arguments.get("endpoint", "http://localhost:11434")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{endpoint}/api/tags", timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        models = data.get("models", [])
+                        output_text = f"🦙 **Ollama Models — {endpoint}**\n\n"
+                        if models:
+                            for m in models:
+                                size_gb = m.get("size", 0) / (1024**3)
+                                output_text += f"  - **{m['name']}** ({size_gb:.1f}GB)\n"
+                        else:
+                            output_text += "No models found. Pull one with `ollama_pull`."
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ Ollama returned {resp.status}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ Cannot connect to Ollama: {e}")], isError=True)
+
+    elif tool_name == "ollama_pull":
+        model = arguments["model"]
+        ip = arguments["instance_ip"]
+        user = arguments.get("ssh_user", "root")
+        key = arguments.get("ssh_key")
+        ssh_base = f"ssh -o StrictHostKeyChecking=no{' -i ' + key if key else ''} {user}@{ip}"
+        result = await execute_shell_command(f"{ssh_base} 'ollama pull {model}'", timeout=600)
+        if result["success"]:
+            output_text = f"📥 **Model Pulled: {model}** on {ip}\n\n{result['stdout']}\n\n"
+            output_text += f"**suggest_action:** Generate with `ollama_generate` or chat with `ollama_chat`."
+        else:
+            output_text = f"❌ **Pull failed**\n\n{result['stderr']}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "ollama_generate":
+        endpoint = arguments.get("endpoint", "http://localhost:11434")
+        model = arguments["model"]
+        prompt = arguments["prompt"]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{endpoint}/api/generate", json={"model": model, "prompt": prompt, "stream": False}, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        output_text = f"🦙 **Ollama Generate — {model}**\n\n{data.get('response', '')}"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ {resp.status}: {body}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "ollama_chat":
+        endpoint = arguments.get("endpoint", "http://localhost:11434")
+        model = arguments["model"]
+        messages = arguments["messages"]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{endpoint}/api/chat", json={"model": model, "messages": messages, "stream": False}, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        reply = data.get("message", {}).get("content", "")
+                        output_text = f"🦙 **Ollama Chat — {model}**\n\n{reply}"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ {resp.status}: {body}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "ollama_model_info":
+        endpoint = arguments.get("endpoint", "http://localhost:11434")
+        model = arguments["model"]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{endpoint}/api/show", json={"name": model}, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        output_text = f"ℹ️ **Ollama Model Info — {model}**\n\n```json\n{json.dumps(data, indent=2)[:3000]}\n```"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ Model not found: {resp.status}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── W&B Handlers ─────────────────────────────────────────────────────
+
+    elif tool_name == "wandb_list_projects":
+        api_key = arguments["api_key"]
+        entity = arguments.get("entity", "me")
+        try:
+            async with aiohttp.ClientSession(headers={"Authorization": f"Bearer {api_key}"}) as session:
+                async with session.get(f"https://api.wandb.ai/v1/entities/{entity}/projects", timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        projects = data.get("projects", data) if isinstance(data, dict) else data
+                        output_text = f"📊 **W&B Projects — {entity}**\n\n"
+                        if isinstance(projects, list):
+                            for p in projects[:50]:
+                                name = p.get("name", p) if isinstance(p, dict) else str(p)
+                                output_text += f"  - **{name}**\n"
+                        else:
+                            output_text += f"```json\n{json.dumps(data, indent=2)[:2000]}\n```"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ W&B API returned {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "wandb_list_runs":
+        api_key = arguments["api_key"]
+        entity = arguments.get("entity", "me")
+        project = arguments["project"]
+        limit = arguments.get("limit", 50)
+        try:
+            async with aiohttp.ClientSession(headers={"Authorization": f"Bearer {api_key}"}) as session:
+                async with session.get(f"https://api.wandb.ai/v1/entities/{entity}/projects/{project}/runs", params={"limit": limit}, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        runs = data.get("runs", data) if isinstance(data, dict) else data
+                        output_text = f"📋 **W&B Runs — {project}**\n\n"
+                        if isinstance(runs, list):
+                            for r in runs[:limit]:
+                                name = r.get("name", r.get("id", "?")) if isinstance(r, dict) else str(r)
+                                state = r.get("state", "?") if isinstance(r, dict) else ""
+                                output_text += f"  - **{name}** ({state})\n"
+                        else:
+                            output_text += f"```json\n{json.dumps(data, indent=2)[:2000]}\n```"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "wandb_run_details":
+        api_key = arguments["api_key"]
+        run_id = arguments["run_id"]
+        try:
+            async with aiohttp.ClientSession(headers={"Authorization": f"Bearer {api_key}"}) as session:
+                async with session.get(f"https://api.wandb.ai/v1/runs/{run_id}", timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        output_text = f"🔍 **W&B Run Details — {run_id}**\n\n```json\n{json.dumps(data, indent=2)[:3000]}\n```"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── LangSmith Handlers ───────────────────────────────────────────────
+
+    elif tool_name == "langsmith_list_projects":
+        api_key = arguments["api_key"]
+        try:
+            async with aiohttp.ClientSession(headers={"x-api-key": api_key}) as session:
+                async with session.get("https://api.smith.langchain.com/api/v1/projects", timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        output_text = "🔗 **LangSmith Projects**\n\n"
+                        for p in (data if isinstance(data, list) else data.get("projects", []))[:50]:
+                            name = p.get("name", "?") if isinstance(p, dict) else str(p)
+                            output_text += f"  - **{name}**\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ LangSmith {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langsmith_list_runs":
+        api_key = arguments["api_key"]
+        project = arguments.get("project", "default")
+        limit = arguments.get("limit", 50)
+        try:
+            async with aiohttp.ClientSession(headers={"x-api-key": api_key}) as session:
+                async with session.get(f"https://api.smith.langchain.com/api/v1/runs", params={"project_name": project, "limit": limit}, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        runs = data if isinstance(data, list) else data.get("runs", [])
+                        output_text = f"📋 **LangSmith Runs — {project}**\n\n"
+                        for r in runs[:limit]:
+                            name = r.get("name", r.get("id", "?")) if isinstance(r, dict) else str(r)
+                            output_text += f"  - **{name}**\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langsmith_gpu_correlate":
+        api_key = arguments["api_key"]
+        project = arguments.get("project", "default")
+        days = arguments.get("days", 7)
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.langsmith_service import LangSmithService, LangSmithConfig
+            svc = LangSmithService(LangSmithConfig(api_key=api_key))
+            correlation = await svc.correlate_runs_with_gpu_metrics(project_name=project, days=days)
+            output_text = f"🔗💰 **GPU-Correlated LangSmith Runs — {project}**\n\n"
+            output_text += f"```json\n{json.dumps(correlation, indent=2, default=str)[:3000]}\n```\n\n"
+            output_text += "**suggest_action:** Use this data to identify cost-efficient GPU/provider combos for your LLM workloads."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ Correlation failed: {e}")], isError=True)
+
+    # ── MLflow Handlers ──────────────────────────────────────────────────
+
+    elif tool_name == "mlflow_list_experiments":
+        uri = arguments["tracking_uri"]
+        username = arguments.get("username")
+        password = arguments.get("password")
+        headers = {}
+        if username and password:
+            import base64 as b64
+            headers["Authorization"] = "Basic " + b64.b64encode(f"{username}:{password}".encode()).decode()
+        try:
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(f"{uri}/api/2.0/mlflow/experiments/search", timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        exps = data.get("experiments", [])
+                        output_text = f"🧪 **MLflow Experiments — {uri}**\n\n"
+                        for e in exps:
+                            output_text += f"  - **{e.get('name', '?')}** (ID: {e.get('experiment_id', '?')})\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ MLflow {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "mlflow_log_run":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.mlflow_service import MLflowService, MLflowConfig
+            config = MLflowConfig(
+                tracking_uri=arguments["tracking_uri"],
+                username=arguments.get("username"),
+                password=arguments.get("password"),
+            )
+            svc = MLflowService(config)
+            result = await svc.log_terradev_run(
+                experiment_name=arguments["experiment_name"],
+                run_name=arguments["run_name"],
+                gpu_type=arguments.get("gpu_type", "unknown"),
+                provider=arguments.get("provider", "unknown"),
+                cost_per_hour=arguments.get("cost_per_hour", 0.0),
+                duration_seconds=arguments.get("duration_seconds", 0.0),
+                extra_metrics=arguments.get("metrics", {}),
+            )
+            output_text = f"✅ **MLflow Run Logged**\n\n"
+            output_text += f"**Experiment:** {arguments['experiment_name']}\n"
+            output_text += f"**Run:** {arguments['run_name']}\n"
+            output_text += f"**GPU:** {arguments.get('gpu_type', 'N/A')} ({arguments.get('provider', 'N/A')})\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:2000]}\n```\n\n"
+            output_text += "**suggest_action:** Register the model with `mlflow_register_model`."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "mlflow_register_model":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.mlflow_service import MLflowService, MLflowConfig
+            config = MLflowConfig(
+                tracking_uri=arguments["tracking_uri"],
+                username=arguments.get("username"),
+                password=arguments.get("password"),
+            )
+            svc = MLflowService(config)
+            result = await svc.register_terradev_model(
+                model_name=arguments["model_name"],
+                run_id=arguments["run_id"],
+                model_uri=arguments.get("model_uri", f"runs:/{arguments['run_id']}/model"),
+                tags=arguments.get("tags", {}),
+            )
+            output_text = f"✅ **Model Registered: {arguments['model_name']}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:2000]}\n```\n\n"
+            output_text += "**suggest_action:** Deploy with `kserve_generate_yaml` or `infer_deploy`."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── DVC Handlers ─────────────────────────────────────────────────────
+
+    elif tool_name == "dvc_status":
+        repo = arguments["repo_path"]
+        try:
+            result = await asyncio.create_subprocess_exec(
+                "dvc", "status", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=repo
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=30)
+            output = stdout.decode() if result.returncode == 0 else stderr.decode()
+            output_text = f"📦 **DVC Status — {repo}**\n\n{output or 'No changes.'}"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=result.returncode != 0)
+        except FileNotFoundError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ DVC not installed. Run: `pip install dvc`")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "dvc_diff":
+        repo = arguments["repo_path"]
+        cmd = ["dvc", "diff"]
+        if arguments.get("rev_a"):
+            cmd.append(arguments["rev_a"])
+        if arguments.get("rev_b"):
+            cmd.append(arguments["rev_b"])
+        try:
+            result = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=repo
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=30)
+            output = stdout.decode() if result.returncode == 0 else stderr.decode()
+            output_text = f"📦 **DVC Diff**\n\n{output or 'No differences.'}"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=result.returncode != 0)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "dvc_stage_checkpoint":
+        repo = arguments["repo_path"]
+        ckpt = arguments["checkpoint_path"]
+        msg = arguments.get("message", "Stage checkpoint via Terradev")
+        remote = arguments.get("remote")
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.dvc_service import DVCService, DVCConfig
+            svc = DVCService(DVCConfig(repo_path=repo))
+            result = await svc.stage_from_checkpoint(checkpoint_path=ckpt, commit_message=msg, remote=remote)
+            output_text = f"✅ **Checkpoint Staged**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:2000]}\n```\n\n"
+            output_text += "**suggest_action:** View changes with `dvc_diff` or push to remote with `dvc_push`."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "dvc_push":
+        repo = arguments["repo_path"]
+        cmd = ["dvc", "push"]
+        if arguments.get("remote"):
+            cmd.extend(["-r", arguments["remote"]])
+        try:
+            result = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=repo
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=300)
+            output = stdout.decode() if result.returncode == 0 else stderr.decode()
+            output_text = f"📤 **DVC Push**\n\n{output}"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=result.returncode != 0)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── KServe Handlers ──────────────────────────────────────────────────
+
+    elif tool_name == "kserve_generate_yaml":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.kserve_service import KServeService, KServeConfig
+            svc = KServeService(KServeConfig(namespace=arguments.get("namespace", "default")))
+            yaml_str = await svc.generate_inferenceservice_yaml(
+                model_name=arguments["model_name"],
+                model_uri=arguments["model_uri"],
+                gpu_type=arguments["gpu_type"],
+                gpu_count=arguments.get("gpu_count", 1),
+                namespace=arguments.get("namespace", "default"),
+                runtime=arguments.get("runtime", "vllm"),
+                min_replicas=arguments.get("min_replicas", 1),
+                max_replicas=arguments.get("max_replicas", 3),
+            )
+            output_text = f"☸️ **KServe InferenceService YAML — {arguments['model_name']}**\n\n"
+            output_text += f"```yaml\n{yaml_str}\n```\n\n"
+            output_text += "**suggest_action:** Apply with `kubectl apply -f <file>.yaml` or deploy to cluster with `k8s_create`."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "kserve_list":
+        ns = arguments.get("namespace", "default")
+        try:
+            result = await asyncio.create_subprocess_exec(
+                "kubectl", "get", "inferenceservices", "-n", ns, "-o", "json",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=15)
+            if result.returncode == 0:
+                data = json.loads(stdout.decode())
+                items = data.get("items", [])
+                output_text = f"☸️ **KServe InferenceServices — {ns}**\n\n"
+                if items:
+                    for item in items:
+                        name = item.get("metadata", {}).get("name", "?")
+                        ready = "✅" if any(c.get("status") == "True" for c in item.get("status", {}).get("conditions", [])) else "⏳"
+                        url = item.get("status", {}).get("url", "N/A")
+                        output_text += f"  - {ready} **{name}** → {url}\n"
+                else:
+                    output_text += "No InferenceServices found."
+                return CallToolResult(content=[TextContent(type="text", text=output_text)])
+            else:
+                return CallToolResult(content=[TextContent(type="text", text=f"❌ kubectl failed: {stderr.decode()}")], isError=True)
+        except FileNotFoundError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ kubectl not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "kserve_status":
+        name = arguments["name"]
+        ns = arguments.get("namespace", "default")
+        try:
+            result = await asyncio.create_subprocess_exec(
+                "kubectl", "get", "inferenceservice", name, "-n", ns, "-o", "json",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=15)
+            if result.returncode == 0:
+                data = json.loads(stdout.decode())
+                status = data.get("status", {})
+                conditions = status.get("conditions", [])
+                url = status.get("url", "N/A")
+                output_text = f"☸️ **KServe Status — {name}**\n\n"
+                output_text += f"**URL:** {url}\n\n**Conditions:**\n"
+                for c in conditions:
+                    icon = "✅" if c.get("status") == "True" else "❌"
+                    output_text += f"  - {icon} **{c.get('type')}**: {c.get('message', '')}\n"
+                return CallToolResult(content=[TextContent(type="text", text=output_text)])
+            else:
+                return CallToolResult(content=[TextContent(type="text", text=f"❌ {stderr.decode()}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── Egress Optimizer Handlers ────────────────────────────────────────
+
+    elif tool_name == "egress_cheapest_route":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.egress_optimizer import EgressOptimizer
+            optimizer = EgressOptimizer()
+            src = f"{arguments['source_provider']}:{arguments['source_region']}"
+            dst = f"{arguments['dest_provider']}:{arguments['dest_region']}"
+            size_gb = arguments["size_gb"]
+            route = optimizer.find_cheapest_route(src, dst, size_gb)
+            output_text = f"🌐 **Cheapest Egress Route**\n\n"
+            output_text += f"**From:** {src}\n**To:** {dst}\n**Size:** {size_gb}GB\n\n"
+            output_text += f"```json\n{json.dumps(route, indent=2, default=str)[:2000]}\n```\n\n"
+            output_text += "**suggest_action:** Use `stage` or `egress_optimize_staging` to execute the transfer."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "egress_optimize_staging":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.egress_optimizer import EgressOptimizer
+            optimizer = EgressOptimizer()
+            source_uri = arguments["source_uri"]
+            targets = arguments["target_regions"]
+            size_gb = arguments["size_gb"]
+            plan = optimizer.optimize_transfer_plan(source_uri, targets, size_gb)
+            output_text = f"🌐 **Optimized Staging Plan**\n\n"
+            output_text += f"**Source:** {source_uri}\n**Targets:** {', '.join(targets)}\n**Size:** {size_gb}GB\n\n"
+            output_text += f"```json\n{json.dumps(plan, indent=2, default=str)[:2000]}\n```\n\n"
+            output_text += "**suggest_action:** Execute with `stage` tool."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
 
     # Execute the command (generic fallback for simple tools)
     result = await execute_terradev_command(cmd_args)

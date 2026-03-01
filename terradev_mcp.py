@@ -4,7 +4,7 @@ Terradev MCP Server - GPU Cloud Provisioning for Claude Code
 
 This MCP server provides access to Terradev CLI functionality for GPU provisioning,
 price comparison, Kubernetes cluster management, and inference deployment across
-11+ cloud providers. Includes Terraform parallel provisioning for optimal efficiency.
+20 cloud providers. Includes Terraform parallel provisioning for optimal efficiency.
 """
 
 import argparse
@@ -43,7 +43,9 @@ try:
         ListToolsResult,
         ReadResourceRequest,
         ReadResourceResult,
+        Resource,
         TextContent,
+        TextResourceContents,
         Tool,
     )
 except ImportError:
@@ -468,7 +470,7 @@ resource "terradev_kubernetes_cluster" "main" {{
 
     if multi_cloud:
         # Add multi-cloud node pools for enhanced resilience
-        providers = ["runpod", "vastai", "lambda", "aws"]
+        providers = ["runpod", "vastai", "lambda", "aws", "alibaba", "ovhcloud", "fluidstack", "hetzner", "siliconflow"]
         for i, provider in enumerate(providers[:node_count]):
             config += (
                 "\n# Multi-cloud node pool - " + provider + "\n"
@@ -607,7 +609,7 @@ output "hf_space_url" {
 def generate_terraform_config(gpu_type: str, count: int, providers: List[str] = None, max_price: float = None) -> str:
     """Generate Terraform configuration for parallel GPU provisioning"""
     
-    providers = providers or ["runpod", "vastai", "lambda", "aws"]
+    providers = providers or ["runpod", "vastai", "lambda", "aws", "alibaba", "ovhcloud", "fluidstack", "hetzner", "siliconflow"]
     
     config = f"""
 terraform {{
@@ -750,14 +752,14 @@ async def handle_list_tools() -> ListToolsResult:
     tools = [
         Tool(
             name="quote_gpu",
-            description="Get real-time GPU prices across all cloud providers",
+            description="Get real-time GPU prices across 20 cloud providers (incl. Alibaba, OVHcloud, FluidStack, Hetzner, SiliconFlow)",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "gpu_type": {
                         "type": "string",
-                        "description": "GPU type (H100, A100, A10G, L40S, L4, T4, RTX4090, RTX3090, V100)",
-                        "enum": ["H100", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "RTX3090", "V100"]
+                        "description": "GPU type (H100, H200, H800, A100, A10G, L40S, L4, T4, RTX4090, RTX3090, V100, V100S, A6000)",
+                        "enum": ["H100", "H200", "H800", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "RTX3090", "V100", "V100S", "A6000"]
                     },
                     "providers": {
                         "type": "string",
@@ -794,7 +796,7 @@ async def handle_list_tools() -> ListToolsResult:
                         "description": "Cloud providers for parallel distribution",
                         "items": {
                             "type": "string",
-                            "enum": ["runpod", "vastai", "lambda", "aws", "gcp", "azure", "coreweave", "tensordock", "oracle", "crusoe", "digitalocean", "hyperstack"]
+                            "enum": ["runpod", "vastai", "lambda", "aws", "gcp", "azure", "coreweave", "tensordock", "oracle", "crusoe", "digitalocean", "hyperstack", "alibaba", "ovhcloud", "fluidstack", "hetzner", "siliconflow"]
                         }
                     },
                     "max_price": {
@@ -1150,7 +1152,7 @@ async def handle_list_tools() -> ListToolsResult:
                     "provider": {
                         "type": "string",
                         "description": "Provider name",
-                        "enum": ["runpod", "aws", "vastai", "gcp", "azure", "lambda", "coreweave", "tensordock", "oracle", "crusoe", "digitalocean", "hyperstack"]
+                        "enum": ["runpod", "aws", "vastai", "gcp", "azure", "lambda", "coreweave", "tensordock", "oracle", "crusoe", "digitalocean", "hyperstack", "alibaba", "ovhcloud", "fluidstack", "hetzner", "siliconflow"]
                     },
                     "quick": {
                         "type": "boolean",
@@ -1170,7 +1172,7 @@ async def handle_list_tools() -> ListToolsResult:
                     "provider": {
                         "type": "string",
                         "description": "Provider to configure",
-                        "enum": ["runpod", "aws", "vastai", "gcp", "azure", "lambda", "coreweave", "tensordock", "oracle", "crusoe", "digitalocean", "hyperstack"]
+                        "enum": ["runpod", "aws", "vastai", "gcp", "azure", "lambda", "coreweave", "tensordock", "oracle", "crusoe", "digitalocean", "hyperstack", "alibaba", "ovhcloud", "fluidstack", "hetzner", "siliconflow"]
                     }
                 },
                 "required": ["provider"]
@@ -1276,7 +1278,7 @@ async def handle_list_tools() -> ListToolsResult:
                     "gpu_type": {
                         "type": "string",
                         "description": "GPU type to analyze",
-                        "enum": ["H100", "H200", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "RTX3090", "V100", "MI300X"]
+                        "enum": ["H100", "H200", "H800", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "RTX3090", "V100", "V100S", "A6000", "MI300X"]
                     },
                     "days": {
                         "type": "integer",
@@ -1294,7 +1296,7 @@ async def handle_list_tools() -> ListToolsResult:
         ),
         Tool(
             name="moe_deploy",
-            description="Deploy Mixture-of-Experts models with production-ready cluster templates. Supports GLM-5, Qwen 3.5, Mistral Large 3, DeepSeek V4, Llama 5. Configures NVLink topology, tensor parallelism, FP8 quantization, vLLM/SGLang backends, and GPU-aware HPA autoscaling.",
+            description="Deploy Mixture-of-Experts models with production-ready cluster templates. Auto-applies vLLM cost optimizations (KV cache offloading for up to 9x throughput, MTP speculative decoding for up to 2.8x speed, sleep mode for 18-200x faster restarts). Supports GLM-5, Qwen 3.5, Mistral Large 3, DeepSeek V4, Llama 5. Configures NVLink topology, tensor parallelism, FP8 quantization, vLLM/SGLang backends, and GPU-aware HPA autoscaling.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1305,7 +1307,7 @@ async def handle_list_tools() -> ListToolsResult:
                     "gpu_type": {
                         "type": "string",
                         "description": "GPU type for MoE serving",
-                        "enum": ["H100", "H200", "A100", "MI300X"]
+                        "enum": ["H100", "H200", "H800", "A100", "MI300X"]
                     },
                     "tp_size": {
                         "type": "integer",
@@ -1425,11 +1427,435 @@ async def handle_list_tools() -> ListToolsResult:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "gpu_type": {"type": "string", "description": "GPU type", "enum": ["H100", "H200", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "MI300X"]},
+                    "gpu_type": {"type": "string", "description": "GPU type", "enum": ["H100", "H200", "H800", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "V100S", "A6000", "MI300X"]},
                     "region": {"type": "string", "description": "Filter by region"},
                     "hours": {"type": "integer", "description": "Hours of history", "default": 24}
                 },
                 "required": ["gpu_type"]
+            }
+        ),
+        # ── v2.0.0 Tools: Complete Agentic Loop ─────────────────────────────
+        # Training pipeline completion
+        Tool(
+            name="train_stop",
+            description="Stop a running training job. Kills training processes on all nodes in parallel.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID to stop"}
+                },
+                "required": ["job_id"]
+            }
+        ),
+        Tool(
+            name="train_resume",
+            description="Resume a training job from its latest checkpoint. Rebuilds config with topology revalidation.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID to resume"},
+                    "checkpoint_id": {"type": "string", "description": "Specific checkpoint to resume from (default: latest)"}
+                },
+                "required": ["job_id"]
+            }
+        ),
+        Tool(
+            name="checkpoint_restore",
+            description="Restore a specific checkpoint for a training job.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID"},
+                    "step": {"type": "integer", "description": "Checkpoint step to restore"},
+                    "checkpoint_id": {"type": "string", "description": "Checkpoint ID to restore"}
+                },
+                "required": ["job_id"]
+            }
+        ),
+        Tool(
+            name="checkpoint_promote",
+            description="Promote a checkpoint to a final model path for serving.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID"},
+                    "checkpoint_id": {"type": "string", "description": "Checkpoint ID to promote"},
+                    "dest": {"type": "string", "description": "Destination path (e.g., /models/final)"}
+                },
+                "required": ["job_id", "checkpoint_id", "dest"]
+            }
+        ),
+        Tool(
+            name="checkpoint_delete",
+            description="Delete a checkpoint.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job ID"},
+                    "checkpoint_id": {"type": "string", "description": "Checkpoint ID to delete"}
+                },
+                "required": ["job_id", "checkpoint_id"]
+            }
+        ),
+        # Data staging
+        Tool(
+            name="stage",
+            description="Compress, chunk, checksum, and position datasets near compute. Supports local paths, S3/GCS URIs, HTTP URLs, and HuggingFace dataset names. Returns staging plan with agent recommendations.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset": {"type": "string", "description": "Dataset path, S3 URI, GCS URI, HTTP URL, or HuggingFace name"},
+                    "target_regions": {"type": "string", "description": "Comma-separated target regions"},
+                    "compression": {"type": "string", "description": "Compression algorithm", "enum": ["auto", "zstd", "gzip", "none"], "default": "auto"},
+                    "plan_only": {"type": "boolean", "description": "Show staging plan without executing", "default": False}
+                },
+                "required": ["dataset"]
+            }
+        ),
+        # Inference deployment
+        Tool(
+            name="infer_deploy",
+            description="Deploy an inference endpoint with auto-scaling, idle shutdown, and cost optimization. Returns estimated cost and requires_confirmation for expensive deployments.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_path": {"type": "string", "description": "Model path or HuggingFace model ID"},
+                    "name": {"type": "string", "description": "Endpoint name"},
+                    "provider": {"type": "string", "description": "Provider for deployment", "enum": ["runpod", "vastai", "lambda", "aws", "gcp", "coreweave", "alibaba", "ovhcloud", "fluidstack", "hetzner", "siliconflow"]},
+                    "gpu_type": {"type": "string", "description": "GPU type", "enum": ["H100", "H200", "H800", "A100", "A10G", "L40S", "L4", "T4", "V100S", "A6000", "MI300X"]},
+                    "min_workers": {"type": "integer", "description": "Minimum workers", "default": 0},
+                    "max_workers": {"type": "integer", "description": "Maximum workers", "default": 3},
+                    "idle_timeout": {"type": "integer", "description": "Idle timeout in seconds", "default": 300},
+                    "cost_optimize": {"type": "boolean", "description": "Enable cost optimization", "default": True},
+                    "dry_run": {"type": "boolean", "description": "Show deployment plan without deploying", "default": False}
+                },
+                "required": ["model_path", "name"]
+            }
+        ),
+        # Manifest cache & drift detection
+        Tool(
+            name="up",
+            description="CLI-native provisioning with manifest cache and drift detection. Use --fix-drift to detect and auto-fix drifted infrastructure.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job": {"type": "string", "description": "Job name for manifest tracking"},
+                    "gpu_type": {"type": "string", "description": "GPU type", "default": "A100"},
+                    "gpu_count": {"type": "integer", "description": "Number of GPUs", "default": 1},
+                    "hours": {"type": "number", "description": "Estimated runtime in hours", "default": 1.0},
+                    "budget": {"type": "number", "description": "Budget constraint ($/hr)"},
+                    "region": {"type": "string", "description": "Preferred region"},
+                    "ttl": {"type": "string", "description": "Time to live for nodes", "default": "1h"},
+                    "fix_drift": {"type": "boolean", "description": "Detect and fix drift automatically", "default": False}
+                },
+                "required": ["job"]
+            }
+        ),
+        Tool(
+            name="rollback",
+            description="Explicit versioned rollback. Format: job@version (e.g., llama3@v3).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_version": {"type": "string", "description": "Job@version string (e.g., llama3@v3)"}
+                },
+                "required": ["job_version"]
+            }
+        ),
+        Tool(
+            name="manifests",
+            description="List cached manifests and versions for jobs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job": {"type": "string", "description": "Show versions for specific job (optional)"}
+                }
+            }
+        ),
+        # Smart deployment
+        Tool(
+            name="smart_deploy",
+            description="AI-ranked deployment options with confidence/risk scoring. Returns recommendations with cost estimates and requires_confirmation for execution.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "image": {"type": "string", "description": "Container image"},
+                    "workload": {"type": "string", "description": "Workload type", "enum": ["training", "inference", "batch"]},
+                    "gpu_type": {"type": "string", "description": "GPU type"},
+                    "budget": {"type": "number", "description": "Max $/hr budget"},
+                    "option": {"type": "integer", "description": "Execute a specific recommended option by index"}
+                },
+                "required": ["image", "workload"]
+            }
+        ),
+        Tool(
+            name="helm_generate",
+            description="Generate Helm charts from workload specifications.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "workload": {"type": "string", "description": "Workload type", "enum": ["training", "inference", "batch"]},
+                    "image": {"type": "string", "description": "Container image"},
+                    "gpu_type": {"type": "string", "description": "GPU type"},
+                    "replicas": {"type": "integer", "description": "Number of replicas", "default": 1}
+                },
+                "required": ["workload", "image"]
+            }
+        ),
+        # GitOps complete
+        Tool(
+            name="gitops_bootstrap",
+            description="Bootstrap ArgoCD or Flux on the cluster.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tool": {"type": "string", "description": "GitOps tool", "enum": ["argocd", "flux"]},
+                    "cluster": {"type": "string", "description": "Cluster name"},
+                    "namespace": {"type": "string", "description": "Namespace", "default": "gitops-system"}
+                },
+                "required": ["tool", "cluster"]
+            }
+        ),
+        Tool(
+            name="gitops_sync",
+            description="Sync cluster with Git repository.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cluster": {"type": "string", "description": "Cluster name"},
+                    "environment": {"type": "string", "description": "Environment to sync", "default": "prod"},
+                    "tool": {"type": "string", "description": "GitOps tool", "enum": ["argocd", "flux"], "default": "argocd"}
+                },
+                "required": ["cluster"]
+            }
+        ),
+        Tool(
+            name="gitops_validate",
+            description="Validate GitOps configuration.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cluster": {"type": "string", "description": "Cluster name"},
+                    "dry_run": {"type": "boolean", "description": "Dry run validation", "default": True}
+                }
+            }
+        ),
+        # Orchestrator tools
+        Tool(
+            name="orchestrator_start",
+            description="Start the model orchestrator for multi-model GPU sharing with eviction policies.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "gpu_id": {"type": "integer", "description": "GPU ID", "default": 0},
+                    "memory_gb": {"type": "number", "description": "Total GPU memory in GB", "default": 80.0},
+                    "policy": {"type": "string", "description": "Scaling policy", "enum": ["billing_optimized", "latency_optimized", "hybrid"], "default": "billing_optimized"}
+                }
+            }
+        ),
+        Tool(
+            name="orchestrator_register",
+            description="Register a model with the orchestrator.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "Model identifier"},
+                    "model_path": {"type": "string", "description": "Path to model weights"},
+                    "framework": {"type": "string", "description": "Framework", "enum": ["pytorch", "vllm", "sglang"], "default": "pytorch"}
+                },
+                "required": ["model_id", "model_path"]
+            }
+        ),
+        Tool(
+            name="orchestrator_load",
+            description="Load a model into GPU memory.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "Model to load"},
+                    "force": {"type": "boolean", "description": "Force loading even if memory is full", "default": False}
+                },
+                "required": ["model_id"]
+            }
+        ),
+        Tool(
+            name="orchestrator_evict",
+            description="Evict a model from GPU memory.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "Model to evict"}
+                },
+                "required": ["model_id"]
+            }
+        ),
+        Tool(
+            name="orchestrator_status",
+            description="Get orchestrator and model status including GPU memory utilization.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "Get details for specific model (optional)"}
+                }
+            }
+        ),
+        Tool(
+            name="orchestrator_infer",
+            description="Test inference with a model via the orchestrator.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "Model to run inference on"}
+                },
+                "required": ["model_id"]
+            }
+        ),
+        # Warm pool tools
+        Tool(
+            name="warm_pool_start",
+            description="Start the warm pool manager for intelligent model pre-warming. 5 strategies: traffic_based, time_based, priority_based, cost_optimized, latency_optimized.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "strategy": {"type": "string", "description": "Warm pool strategy", "enum": ["traffic_based", "time_based", "priority_based", "cost_optimized", "latency_optimized"], "default": "traffic_based"},
+                    "max_warm": {"type": "integer", "description": "Max models to keep warm", "default": 10},
+                    "min_warm": {"type": "integer", "description": "Min models to keep warm", "default": 3}
+                }
+            }
+        ),
+        Tool(
+            name="warm_pool_status",
+            description="Get warm pool status: hit rate, cold starts, memory saved, cost saved.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        # Cost scaler tools
+        Tool(
+            name="cost_scaler_start",
+            description="Start the budget-aware auto-scaling manager. 4 strategies: minimize_cost, balance_cost_latency, latency_critical, budget_constrained.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "strategy": {"type": "string", "description": "Cost strategy", "enum": ["minimize_cost", "balance_cost_latency", "latency_critical", "budget_constrained"], "default": "balance_cost_latency"},
+                    "budget": {"type": "number", "description": "Hourly budget in USD", "default": 15.0},
+                    "cost_per_gb": {"type": "number", "description": "Cost per GB per hour", "default": 0.10}
+                }
+            }
+        ),
+        Tool(
+            name="cost_scaler_status",
+            description="Get cost scaler status with budget utilization, predictions, and optimization recommendations.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        # InferX complete
+        Tool(
+            name="inferx_configure",
+            description="Configure InferX serverless platform credentials.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "InferX API key"},
+                    "endpoint": {"type": "string", "description": "InferX API endpoint", "default": "https://api.inferx.net"},
+                    "region": {"type": "string", "description": "Region", "default": "us-west-2"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="inferx_delete",
+            description="Delete an InferX model deployment.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "Model deployment ID to delete"}
+                },
+                "required": ["model_id"]
+            }
+        ),
+        Tool(
+            name="inferx_usage",
+            description="Get InferX account usage statistics: requests, cost, GPU hours, latency.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="inferx_quote",
+            description="Get InferX pricing quotes for a GPU type.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "gpu_type": {"type": "string", "description": "GPU type to quote", "default": "A100"},
+                    "region": {"type": "string", "description": "Region for quote"}
+                }
+            }
+        ),
+        # HF Space deploy (already exists above)
+        Tool(
+            name="hf_space_status",
+            description="Get HuggingFace Space deployment status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "space_name": {"type": "string", "description": "Space name to check"}
+                },
+                "required": ["space_name"]
+            }
+        ),
+        # Workflow primitives
+        Tool(
+            name="run_workflow",
+            description="Run a declarative YAML workflow that chains multiple Terradev commands (provision → preflight → train → monitor → checkpoint). Returns step-by-step execution status with cost estimates and confirmation gates for expensive operations.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "workflow": {"type": "string", "description": "Workflow YAML path or inline YAML string"},
+                    "dry_run": {"type": "boolean", "description": "Show execution plan without running", "default": False},
+                    "template": {"type": "string", "description": "Use built-in template", "enum": ["finetune-llama", "inference-deploy", "benchmark-gpu", "cost-optimize"]}
+                }
+            }
+        ),
+        # Active context — session-start awareness
+        Tool(
+            name="active_context",
+            description="Get current Terradev state: running training jobs, active instances, spend-to-date, alerts. Call this on session start to resume context from previous sessions.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        # ── v3.5.0: Multi-LoRA adapter management ────────────────────────
+        Tool(
+            name="lora_list",
+            description="List LoRA adapters loaded on a running vLLM endpoint. Shows base models and hot-loaded fine-tuned adapters.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "vLLM endpoint URL (e.g. http://10.0.0.1:8000)"},
+                    "api_key": {"type": "string", "description": "vLLM API key (if set)"}
+                },
+                "required": ["endpoint"]
+            }
+        ),
+        Tool(
+            name="lora_add",
+            description="Hot-load a LoRA adapter onto a running vLLM endpoint. The adapter becomes immediately available as a model name for inference requests. Uses vLLM's fused_moe_lora kernel for 454% higher output tokens/sec on MoE models.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "vLLM endpoint URL (e.g. http://10.0.0.1:8000)"},
+                    "name": {"type": "string", "description": "Adapter name (becomes the model name in API requests)"},
+                    "path": {"type": "string", "description": "Path to adapter weights (local path or HuggingFace ID)"},
+                    "api_key": {"type": "string", "description": "vLLM API key (if set)"}
+                },
+                "required": ["endpoint", "name", "path"]
+            }
+        ),
+        Tool(
+            name="lora_remove",
+            description="Hot-unload a LoRA adapter from a running vLLM endpoint. Frees GPU memory for other adapters.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {"type": "string", "description": "vLLM endpoint URL (e.g. http://10.0.0.1:8000)"},
+                    "name": {"type": "string", "description": "Adapter name to unload"},
+                    "api_key": {"type": "string", "description": "vLLM API key (if set)"}
+                },
+                "required": ["endpoint", "name"]
             }
         ),
     ]
@@ -1482,6 +1908,43 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         "price_intel": ["analytics"],
         "moe_deploy": ["provision"],
         "gitops_init": ["gitops", "init"],
+        # v2.0.0 tools — complete agentic loop
+        "train_stop": ["train-stop"],
+        "train_resume": ["train-resume"],
+        "checkpoint_restore": ["checkpoint", "restore"],
+        "checkpoint_promote": ["checkpoint", "promote"],
+        "checkpoint_delete": ["checkpoint", "delete"],
+        "stage": ["stage"],
+        "infer_deploy": ["infer-deploy"],
+        "up": ["up"],
+        "rollback": ["rollback"],
+        "manifests": ["manifests"],
+        "smart_deploy": ["smart-deploy"],
+        "helm_generate": ["helm-generate"],
+        "gitops_bootstrap": ["gitops", "bootstrap"],
+        "gitops_sync": ["gitops", "sync"],
+        "gitops_validate": ["gitops", "validate"],
+        "orchestrator_start": ["orchestrator-start"],
+        "orchestrator_register": ["orchestrator-register"],
+        "orchestrator_load": ["orchestrator-load"],
+        "orchestrator_evict": ["orchestrator-evict"],
+        "orchestrator_status": ["orchestrator-status"],
+        "orchestrator_infer": ["orchestrator-infer"],
+        "warm_pool_start": ["warm-pool-start"],
+        "warm_pool_status": ["warm-pool-status"],
+        "cost_scaler_start": ["cost-scaler-start"],
+        "cost_scaler_status": ["cost-scaler-status"],
+        "inferx_configure": ["inferx", "configure"],
+        "inferx_delete": ["inferx", "delete"],
+        "inferx_usage": ["inferx", "usage"],
+        "inferx_quote": ["inferx", "quote"],
+        "hf_space_status": ["hf-space"],
+        "run_workflow": ["workflow", "run"],
+        "active_context": ["status"],  # Composite — handled specially
+        # v3.5.0: Multi-LoRA
+        "lora_list": ["lora", "list"],
+        "lora_add": ["lora", "add"],
+        "lora_remove": ["lora", "remove"],
     }
     
     if tool_name not in command_map:
@@ -2037,6 +2500,11 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         output_text += f"**Backend:** {backend}\n"
         output_text += f"**Quantization:** {quantization}\n"
         output_text += f"**Dry Run:** {dry_run}\n\n"
+        output_text += "💰 **Auto-Applied Cost Optimizations:**\n"
+        output_text += "• KV Cache Offloading → CPU DRAM (up to 9x throughput)\n"
+        output_text += "• MTP Speculative Decoding (up to 2.8x generation speed)\n"
+        output_text += "• Sleep Mode (18-200x faster than cold restart on idle)\n"
+        output_text += "• Expert Load Balancing + DeepEP/DeepGEMM kernels\n\n"
         
         if result["success"]:
             output_text += output
@@ -2051,6 +2519,78 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             output_text += f"```bash\n"
             output_text += f"kubectl apply -f clusters/moe-template/k8s/\n"
             output_text += f"```"
+        
+        output_text += "\n\n🔗 **Next:** Use `lora_add` to hot-load fine-tuned adapters onto this endpoint."
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    # ── v3.5.0 Handlers: Multi-LoRA ───────────────────────────────────
+
+    elif tool_name == "lora_list":
+        endpoint = arguments["endpoint"]
+        api_key = arguments.get("api_key", "")
+        cmd_args = ["lora", "list", "-e", endpoint]
+        if api_key:
+            cmd_args.extend(["--api-key", api_key])
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        output_text = f"🔍 **LoRA Adapters on {endpoint}**\n\n"
+        output_text += output if output.strip() else "No adapters loaded.\n"
+        output_text += "\n💡 Use `lora_add` to hot-load a fine-tuned adapter."
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    elif tool_name == "lora_add":
+        endpoint = arguments["endpoint"]
+        name = arguments["name"]
+        path = arguments["path"]
+        api_key = arguments.get("api_key", "")
+        cmd_args = ["lora", "add", "-e", endpoint, "-n", name, "-p", path]
+        if api_key:
+            cmd_args.extend(["--api-key", api_key])
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        if result["success"]:
+            output_text = f"✅ **Adapter '{name}' loaded on {endpoint}**\n\n"
+            output_text += f"Use in API requests: `\"model\": \"{name}\"`\n\n"
+            output_text += f"```bash\n"
+            output_text += f"curl {endpoint}/v1/chat/completions \\\n"
+            output_text += f"  -d '{{\"model\": \"{name}\", \"messages\": [...]}}' \n"
+            output_text += f"```"
+        else:
+            output_text = f"❌ **Failed to load adapter '{name}'**\n\n{output}"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=output_text)],
+            isError=not result["success"]
+        )
+    
+    elif tool_name == "lora_remove":
+        endpoint = arguments["endpoint"]
+        name = arguments["name"]
+        api_key = arguments.get("api_key", "")
+        cmd_args = ["lora", "remove", "-e", endpoint, "-n", name]
+        if api_key:
+            cmd_args.extend(["--api-key", api_key])
+        
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        
+        if result["success"]:
+            output_text = f"✅ **Adapter '{name}' unloaded from {endpoint}**\n"
+            output_text += "GPU memory freed for other adapters."
+        else:
+            output_text = f"❌ **Failed to unload adapter '{name}'**\n\n{output}"
         
         return CallToolResult(
             content=[TextContent(type="text", text=output_text)],
@@ -2178,7 +2718,552 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             isError=not result["success"]
         )
     
-    # Execute the command
+    # ── v2.0.0 Handlers — Complete Agentic Loop ────────────────────────
+
+    elif tool_name == "train_stop":
+        cmd_args = ["train-stop", "--job-id", arguments["job_id"], "-f", "json"]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "⏹️ **Training Stop**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Check final status with `train_status`, then optionally `train_resume` later."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "train_resume":
+        cmd_args = ["train-resume", "--job-id", arguments["job_id"], "-f", "json"]
+        if arguments.get("checkpoint_id"):
+            cmd_args.extend(["--checkpoint-id", arguments["checkpoint_id"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "▶️ **Training Resume**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Monitor progress with `train_monitor`. Check `train_status` for ETA."
+        else:
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "💡 **Tip:** Ensure the job has checkpoints: `checkpoint_list`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "checkpoint_restore":
+        cmd_args = ["checkpoint", "restore", "--job-id", arguments["job_id"], "-f", "json"]
+        if arguments.get("step"):
+            cmd_args.extend(["--step", str(arguments["step"])])
+        if arguments.get("checkpoint_id"):
+            cmd_args.extend(["--checkpoint-id", arguments["checkpoint_id"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "💾 **Checkpoint Restore**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Resume training with `train_resume` or promote with `checkpoint_promote`."
+        else:
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "💡 List available checkpoints: `checkpoint_list`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "checkpoint_promote":
+        cmd_args = ["checkpoint", "promote", "--job-id", arguments["job_id"],
+                     "--checkpoint-id", arguments["checkpoint_id"],
+                     "--dest", arguments["dest"], "-f", "json"]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🏆 **Checkpoint Promoted**\n\n"
+        if result["success"]:
+            output_text += f"**Destination:** {arguments['dest']}\n\n"
+            output_text += output
+            output_text += "\n\n**suggest_action:** Deploy for inference with `infer_deploy` or `inferx_deploy`."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "checkpoint_delete":
+        cmd_args = ["checkpoint", "delete", "--job-id", arguments["job_id"],
+                     "--checkpoint-id", arguments["checkpoint_id"], "-f", "json"]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🗑️ **Checkpoint Deleted**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "stage":
+        cmd_args = ["stage", "--dataset", arguments["dataset"]]
+        if arguments.get("target_regions"):
+            cmd_args.extend(["--target-regions", arguments["target_regions"]])
+        if arguments.get("compression"):
+            cmd_args.extend(["--compression", arguments["compression"]])
+        if arguments.get("plan_only"):
+            cmd_args.append("--plan-only")
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "📦 **Data Staging**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Data is staged. Proceed with `train` to start training or `preflight` to validate nodes."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "infer_deploy":
+        model_path = arguments["model_path"]
+        name = arguments["name"]
+        # Cost guardrail: estimate and warn
+        est_cost = 0.0
+        gpu_type = arguments.get("gpu_type", "A100")
+        gpu_costs = {"H100": 3.50, "A100": 2.20, "A10G": 1.10, "L40S": 1.80, "L4": 0.80, "T4": 0.50}
+        est_cost = gpu_costs.get(gpu_type, 2.00) * arguments.get("max_workers", 3)
+
+        if arguments.get("dry_run"):
+            output_text = "📋 **Inference Deployment Plan (Dry Run)**\n\n"
+            output_text += f"**Model:** {model_path}\n"
+            output_text += f"**Endpoint:** {name}\n"
+            output_text += f"**GPU:** {gpu_type}\n"
+            output_text += f"**Workers:** {arguments.get('min_workers', 0)}-{arguments.get('max_workers', 3)}\n"
+            output_text += f"**Idle Timeout:** {arguments.get('idle_timeout', 300)}s\n"
+            output_text += f"**Estimated Max Cost:** ${est_cost:.2f}/hr\n\n"
+            output_text += "**requires_confirmation:** true\n"
+            output_text += f"**estimated_cost:** ${est_cost:.2f}/hr (max {arguments.get('max_workers', 3)} workers × ${gpu_costs.get(gpu_type, 2.00):.2f}/hr)\n\n"
+            output_text += "**suggest_action:** Call `infer_deploy` again without `dry_run` to execute."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+
+        cmd_args = ["infer-deploy", model_path, "--name", name]
+        if arguments.get("provider"):
+            cmd_args.extend(["--provider", arguments["provider"]])
+        if arguments.get("gpu_type"):
+            cmd_args.extend(["--gpu-type", arguments["gpu_type"]])
+        if "idle_timeout" in arguments:
+            cmd_args.extend(["--idle-timeout", str(arguments["idle_timeout"])])
+        if arguments.get("cost_optimize"):
+            cmd_args.append("--cost-optimize")
+        if "min_workers" in arguments:
+            cmd_args.extend(["--min-workers", str(arguments["min_workers"])])
+        if "max_workers" in arguments:
+            cmd_args.extend(["--max-workers", str(arguments["max_workers"])])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🚀 **Inference Deployment**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += f"\n\n**estimated_cost:** ${est_cost:.2f}/hr (max)\n"
+            output_text += "**suggest_action:** Check status with `infer_status`. Monitor with `infer_failover --dry-run`."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "up":
+        cmd_args = ["up", "--job", arguments["job"]]
+        if arguments.get("gpu_type"):
+            cmd_args.extend(["--gpu-type", arguments["gpu_type"]])
+        if arguments.get("gpu_count"):
+            cmd_args.extend(["--count", str(arguments["gpu_count"])])
+        if arguments.get("ttl"):
+            cmd_args.extend(["--ttl", arguments["ttl"]])
+        if arguments.get("budget"):
+            cmd_args.extend(["--budget", str(arguments["budget"])])
+        if arguments.get("region"):
+            cmd_args.extend(["--region", arguments["region"]])
+        if arguments.get("fix_drift"):
+            cmd_args.append("--fix-drift")
+        # Cost guardrail
+        gpu_type = arguments.get("gpu_type", "A100")
+        gpu_count = arguments.get("gpu_count", 1)
+        gpu_costs = {"H100": 3.50, "A100": 2.20, "A10G": 1.10, "L40S": 1.80, "L4": 0.80, "T4": 0.50}
+        est_hourly = gpu_costs.get(gpu_type, 2.00) * gpu_count
+        hours = arguments.get("hours", 1.0)
+        est_total = est_hourly * hours
+
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "⬆️ **Manifest-Cached Provision**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += f"\n\n**estimated_cost:** ${est_hourly:.2f}/hr × {hours}h = ${est_total:.2f}\n"
+            if est_total > 50:
+                output_text += "⚠️ **Cost Warning:** Estimated spend exceeds $50. Monitor with `status`.\n"
+            output_text += "**suggest_action:** Run `preflight` then `train` on provisioned nodes."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "rollback":
+        cmd_args = ["rollback", arguments["job_version"]]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "⏪ **Rollback**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Check current state with `manifests` and verify with `status`."
+        else:
+            output_text += f"⚠️ {output}\n\n💡 List versions: `manifests`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "manifests":
+        cmd_args = ["manifests"]
+        if arguments.get("job"):
+            cmd_args.extend(["--job", arguments["job"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "📋 **Cached Manifests**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "smart_deploy":
+        cmd_args = ["smart-deploy", "--image", arguments["image"], "--workload", arguments["workload"]]
+        if arguments.get("gpu_type"):
+            cmd_args.extend(["--gpu-type", arguments["gpu_type"]])
+        if arguments.get("budget"):
+            cmd_args.extend(["--budget", str(arguments["budget"])])
+        if arguments.get("option") is not None:
+            cmd_args.extend(["--option", str(arguments["option"])])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🧠 **Smart Deployment**\n\n"
+        if result["success"]:
+            output_text += output
+            if arguments.get("option") is None:
+                output_text += "\n\n**requires_confirmation:** true\n"
+                output_text += "**suggest_action:** Review options above. Execute with `smart_deploy` and `option` parameter set to your chosen index."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "helm_generate":
+        cmd_args = ["helm-generate", "--workload", arguments["workload"], "--image", arguments["image"]]
+        if arguments.get("gpu_type"):
+            cmd_args.extend(["--gpu-type", arguments["gpu_type"]])
+        if arguments.get("replicas"):
+            cmd_args.extend(["--replicas", str(arguments["replicas"])])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "⎈ **Helm Chart Generated**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Apply with `kubectl apply -f` or deploy to cluster with `k8s_create`."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "gitops_bootstrap":
+        tool = arguments["tool"]
+        cluster = arguments["cluster"]
+        cmd_args = ["gitops", "bootstrap", "--tool", tool, "--cluster", cluster]
+        if arguments.get("namespace"):
+            cmd_args.extend(["--namespace", arguments["namespace"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = f"🔧 **GitOps Bootstrap ({tool})**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += f"\n\n**suggest_action:** Sync with `gitops_sync --cluster {cluster}`. Validate with `gitops_validate`."
+        else:
+            output_text += f"⚠️ {output}\n\n💡 Initialize first: `gitops_init`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "gitops_sync":
+        cluster = arguments["cluster"]
+        cmd_args = ["gitops", "sync", "--cluster", cluster]
+        if arguments.get("environment"):
+            cmd_args.extend(["--environment", arguments["environment"]])
+        if arguments.get("tool"):
+            cmd_args.extend(["--tool", arguments["tool"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = f"🔄 **GitOps Sync — {cluster}**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Validate sync with `gitops_validate`."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "gitops_validate":
+        cmd_args = ["gitops", "validate"]
+        if arguments.get("cluster"):
+            cmd_args.extend(["--cluster", arguments["cluster"]])
+        if arguments.get("dry_run", True):
+            cmd_args.append("--dry-run")
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "✅ **GitOps Validation**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "orchestrator_start":
+        cmd_args = ["orchestrator-start"]
+        if arguments.get("gpu_id") is not None:
+            cmd_args.extend(["--gpu-id", str(arguments["gpu_id"])])
+        if arguments.get("memory_gb"):
+            cmd_args.extend(["--memory-gb", str(arguments["memory_gb"])])
+        if arguments.get("policy"):
+            cmd_args.extend(["--policy", arguments["policy"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🎛️ **Model Orchestrator Started**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Register models with `orchestrator_register`, then `orchestrator_load` to load them."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "orchestrator_register":
+        cmd_args = ["orchestrator-register", arguments["model_id"], arguments["model_path"]]
+        if arguments.get("framework"):
+            cmd_args.extend(["--framework", arguments["framework"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = f"📝 **Model Registered: {arguments['model_id']}**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += f"\n\n**suggest_action:** Load into GPU memory with `orchestrator_load`."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "orchestrator_load":
+        cmd_args = ["orchestrator-load", arguments["model_id"]]
+        if arguments.get("force"):
+            cmd_args.append("--force")
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = f"📥 **Model Loaded: {arguments['model_id']}**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Test with `orchestrator_infer`. Check memory with `orchestrator_status`."
+        else:
+            output_text += f"⚠️ {output}\n\n💡 Check memory: `orchestrator_status`. Try `--force` to evict least-used."
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "orchestrator_evict":
+        cmd_args = ["orchestrator-evict", arguments["model_id"]]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = f"📤 **Model Evicted: {arguments['model_id']}**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "orchestrator_status":
+        cmd_args = ["orchestrator-status"]
+        if arguments.get("model_id"):
+            cmd_args.append(arguments["model_id"])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🎛️ **Orchestrator Status**\n\n"
+        if result["success"]:
+            output_text += output
+            # Agent recommendations based on output
+            if "utilization" in output.lower():
+                output_text += "\n\n**recommend:** "
+                if "90%" in output or "95%" in output or "100%" in output:
+                    output_text += "GPU memory is near capacity. Consider `orchestrator_evict` for idle models or scaling up."
+                elif "10%" in output or "15%" in output or "20%" in output:
+                    output_text += "GPU memory is underutilized. Consider loading more models with `orchestrator_load`."
+                else:
+                    output_text += "Memory utilization is balanced."
+        else:
+            output_text += f"⚠️ {output}\n\n💡 Start orchestrator first: `orchestrator_start`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "orchestrator_infer":
+        cmd_args = ["orchestrator-infer", arguments["model_id"]]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = f"⚡ **Inference Test: {arguments['model_id']}**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "warm_pool_start":
+        cmd_args = ["warm-pool-start"]
+        if arguments.get("strategy"):
+            cmd_args.extend(["--strategy", arguments["strategy"]])
+        if arguments.get("max_warm"):
+            cmd_args.extend(["--max-warm", str(arguments["max_warm"])])
+        if arguments.get("min_warm"):
+            cmd_args.extend(["--min-warm", str(arguments["min_warm"])])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🔥 **Warm Pool Started**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Register models with `warm_pool_register`. Check `warm_pool_status` for hit rates."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "warm_pool_status":
+        cmd_args = ["warm-pool-status"]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🔥 **Warm Pool Status**\n\n"
+        if result["success"]:
+            output_text += output
+            # Agent recommendation
+            output_text += "\n\n**recommend:** "
+            if "hit rate" in output.lower():
+                output_text += "Review hit rate. If below 80%, consider adjusting strategy or increasing max_warm."
+            else:
+                output_text += "Pool is operational."
+        else:
+            output_text += f"⚠️ {output}\n\n💡 Start warm pool first: `warm_pool_start`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "cost_scaler_start":
+        cmd_args = ["cost-scaler-start"]
+        if arguments.get("strategy"):
+            cmd_args.extend(["--strategy", arguments["strategy"]])
+        if arguments.get("budget"):
+            cmd_args.extend(["--budget", str(arguments["budget"])])
+        if arguments.get("cost_per_gb"):
+            cmd_args.extend(["--cost-per-gb", str(arguments["cost_per_gb"])])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "💰 **Cost Scaler Started**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Monitor with `cost_scaler_status` for budget utilization and predictions."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "cost_scaler_status":
+        cmd_args = ["cost-scaler-status"]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "💰 **Cost Scaler Status**\n\n"
+        if result["success"]:
+            output_text += output
+            # Agent recommendations
+            output_text += "\n\n**recommend:** "
+            if "budget" in output.lower() and ("exceed" in output.lower() or "over" in output.lower()):
+                output_text += "⚠️ Budget at risk. Consider scaling down or switching strategy to `minimize_cost`."
+            elif "under" in output.lower():
+                output_text += "Budget is healthy. You have headroom to scale up if needed."
+            else:
+                output_text += "Cost scaling is within bounds."
+        else:
+            output_text += f"⚠️ {output}\n\n💡 Start cost scaler first: `cost_scaler_start`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "inferx_configure":
+        cmd_args = ["inferx", "configure", "--api-key", arguments["api_key"]]
+        if arguments.get("endpoint"):
+            cmd_args.extend(["--endpoint", arguments["endpoint"]])
+        if arguments.get("region"):
+            cmd_args.extend(["--region", arguments["region"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🔑 **InferX Configured**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Deploy a model with `inferx_deploy` or check quotes with `inferx_quote`."
+        else:
+            output_text += f"⚠️ {output}"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "inferx_delete":
+        cmd_args = ["inferx", "delete", "--model-id", arguments["model_id"]]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = f"🗑️ **InferX Deployment Deleted: {arguments['model_id']}**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "inferx_usage":
+        cmd_args = ["inferx", "usage"]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "📊 **InferX Usage**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Optimize costs with `inferx_optimize`."
+        else:
+            output_text += f"⚠️ {output}\n\n💡 Configure InferX first: `inferx_configure`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "inferx_quote":
+        cmd_args = ["inferx", "quote"]
+        if arguments.get("gpu_type"):
+            cmd_args.extend(["--gpu-type", arguments["gpu_type"]])
+        if arguments.get("region"):
+            cmd_args.extend(["--region", arguments["region"]])
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "💰 **InferX Pricing Quote**\n\n"
+        if result["success"]:
+            output_text += output
+            output_text += "\n\n**suggest_action:** Deploy with `inferx_deploy` at these rates."
+        else:
+            output_text += f"⚠️ {output}\n\n💡 Configure InferX first: `inferx_configure`"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "hf_space_status":
+        cmd_args = ["hf-space", "--status", arguments["space_name"]]
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = f"🤗 **HF Space Status: {arguments['space_name']}**\n\n" + output
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "run_workflow":
+        # Workflow primitives — runs a YAML pipeline or built-in template
+        if arguments.get("template"):
+            cmd_args = ["workflow", "run", "--template", arguments["template"]]
+        elif arguments.get("workflow"):
+            cmd_args = ["workflow", "run", arguments["workflow"]]
+        else:
+            return CallToolResult(
+                content=[TextContent(type="text", text="⚠️ Provide either `workflow` (YAML path) or `template` (built-in).")],
+                isError=True
+            )
+        if arguments.get("dry_run"):
+            cmd_args.append("--dry-run")
+        result = await execute_terradev_command(cmd_args)
+        output = result["stdout"] if result["success"] else result["stderr"]
+        output_text = "🔄 **Workflow Execution**\n\n"
+        if result["success"]:
+            output_text += output
+            if arguments.get("dry_run"):
+                output_text += "\n\n**requires_confirmation:** true\n"
+                output_text += "**suggest_action:** Review the plan above. Run again without `dry_run` to execute."
+            else:
+                output_text += "\n\n**suggest_action:** Monitor progress with `active_context` or `train_status`."
+        else:
+            output_text += f"⚠️ {output}\n\n"
+            output_text += "**Available templates:** finetune-llama, inference-deploy, benchmark-gpu, cost-optimize"
+        return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
+
+    elif tool_name == "active_context":
+        # Composite tool: gather state from multiple commands
+        context_parts = []
+
+        # 1. Running training jobs
+        jobs_result = await execute_terradev_command(["train-status", "-f", "json"])
+        if jobs_result["success"]:
+            context_parts.append(f"**Training Jobs:**\n{jobs_result['stdout']}")
+        else:
+            context_parts.append("**Training Jobs:** None running")
+
+        # 2. Active instances
+        status_result = await execute_terradev_command(["status", "-f", "json"])
+        if status_result["success"]:
+            context_parts.append(f"\n**Active Instances:**\n{status_result['stdout']}")
+        else:
+            context_parts.append("\n**Active Instances:** None")
+
+        # 3. Cost analytics (last 7 days)
+        analytics_result = await execute_terradev_command(["analytics", "--days", "7", "-f", "json"])
+        if analytics_result["success"]:
+            context_parts.append(f"\n**Spend (7 days):**\n{analytics_result['stdout']}")
+        else:
+            context_parts.append("\n**Spend:** No data")
+
+        output_text = "🏠 **Active Context — Terradev State**\n\n"
+        output_text += "\n".join(context_parts)
+        output_text += "\n\n**suggest_action:** "
+        if jobs_result["success"] and "running" in jobs_result["stdout"].lower():
+            output_text += "You have running jobs. Monitor with `train_monitor` or check `train_status`."
+        elif status_result["success"] and status_result["stdout"].strip() and status_result["stdout"].strip() != "[]":
+            output_text += "You have active instances. Consider `optimize` to find cheaper alternatives."
+        else:
+            output_text += "No active workloads. Start with `quote_gpu` to compare prices, then `provision_gpu` or `up`."
+        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+
+    # Execute the command (generic fallback for simple tools)
     result = await execute_terradev_command(cmd_args)
     
     if result["success"]:
@@ -2194,13 +3279,104 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
 
 @server.list_resources()
 async def handle_list_resources() -> ListResourcesResult:
-    """List available resources"""
-    return ListResourcesResult(resources=[])
+    """List available MCP resources for session-start context and polling."""
+    return ListResourcesResult(resources=[
+        Resource(
+            uri="terradev://active_context",
+            name="Active Context",
+            description="Current Terradev state: running jobs, active instances, spend-to-date, alerts. Read on session start.",
+            mimeType="application/json",
+        ),
+        Resource(
+            uri="terradev://instances",
+            name="Active Instances",
+            description="Currently provisioned GPU instances across all providers.",
+            mimeType="application/json",
+        ),
+        Resource(
+            uri="terradev://jobs",
+            name="Training Jobs",
+            description="All training jobs with status, progress, and ETA.",
+            mimeType="application/json",
+        ),
+        Resource(
+            uri="terradev://spend",
+            name="Spend Summary",
+            description="Cost analytics and spend-to-date across all providers.",
+            mimeType="application/json",
+        ),
+        Resource(
+            uri="terradev://alerts",
+            name="Alerts",
+            description="Active alerts: straggler nodes, budget warnings, drift detected, failed health checks.",
+            mimeType="application/json",
+        ),
+    ])
 
 @server.read_resource()
 async def handle_read_resource(request: ReadResourceRequest) -> ReadResourceResult:
-    """Read a resource"""
-    return ReadResourceResult(contents=[])
+    """Read a Terradev resource."""
+    uri = str(request.params.uri)
+
+    if uri == "terradev://active_context":
+        # Composite: jobs + instances + spend
+        jobs = await execute_terradev_command(["train-status", "-f", "json"])
+        instances = await execute_terradev_command(["status", "-f", "json"])
+        spend = await execute_terradev_command(["analytics", "--days", "7", "-f", "json"])
+        context = {
+            "jobs": jobs["stdout"] if jobs["success"] else None,
+            "instances": instances["stdout"] if instances["success"] else None,
+            "spend_7d": spend["stdout"] if spend["success"] else None,
+            "suggest_action": "Call active_context tool for formatted recommendations.",
+        }
+        return ReadResourceResult(contents=[
+            TextResourceContents(uri=uri, mimeType="application/json", text=json.dumps(context, indent=2))
+        ])
+
+    elif uri == "terradev://instances":
+        result = await execute_terradev_command(["status", "-f", "json"])
+        text = result["stdout"] if result["success"] else json.dumps({"error": result["stderr"]})
+        return ReadResourceResult(contents=[
+            TextResourceContents(uri=uri, mimeType="application/json", text=text)
+        ])
+
+    elif uri == "terradev://jobs":
+        result = await execute_terradev_command(["train-status", "-f", "json"])
+        text = result["stdout"] if result["success"] else json.dumps({"error": result["stderr"]})
+        return ReadResourceResult(contents=[
+            TextResourceContents(uri=uri, mimeType="application/json", text=text)
+        ])
+
+    elif uri == "terradev://spend":
+        result = await execute_terradev_command(["analytics", "--days", "30", "-f", "json"])
+        text = result["stdout"] if result["success"] else json.dumps({"error": result["stderr"]})
+        return ReadResourceResult(contents=[
+            TextResourceContents(uri=uri, mimeType="application/json", text=text)
+        ])
+
+    elif uri == "terradev://alerts":
+        # Aggregate alerts from multiple sources
+        alerts = []
+        # Check for straggler nodes via monitor
+        monitor = await execute_terradev_command(["monitor", "--check-stragglers", "-f", "json"])
+        if monitor["success"] and monitor["stdout"].strip():
+            alerts.append({"type": "straggler", "data": monitor["stdout"]})
+        # Check cost budget
+        cost = await execute_terradev_command(["cost-scaler-status", "-f", "json"])
+        if cost["success"] and "exceed" in cost["stdout"].lower():
+            alerts.append({"type": "budget_warning", "data": cost["stdout"]})
+        # Check drift
+        drift = await execute_terradev_command(["manifests", "--check-drift", "-f", "json"])
+        if drift["success"] and "drift" in drift["stdout"].lower():
+            alerts.append({"type": "drift_detected", "data": drift["stdout"]})
+        text = json.dumps({"alerts": alerts, "count": len(alerts)}, indent=2)
+        return ReadResourceResult(contents=[
+            TextResourceContents(uri=uri, mimeType="application/json", text=text)
+        ])
+
+    return ReadResourceResult(contents=[
+        TextResourceContents(uri=uri, mimeType="application/json", text=json.dumps({"error": f"Unknown resource: {uri}"}))
+    ])
 
 @server.list_prompts()
 async def handle_list_prompts() -> ListPromptsResult:
@@ -2452,7 +3628,7 @@ def create_sse_app() -> "Starlette":
         )
 
     async def health(request: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok", "server": "terradev-mcp", "version": "1.6.0"})
+        return JSONResponse({"status": "ok", "server": "terradev-mcp", "version": "2.0.1"})
 
     # SSE handler wraps the MCP server
     class SseHandler:
@@ -2478,7 +3654,7 @@ def create_sse_app() -> "Starlette":
                     streams[1],
                     InitializationOptions(
                         server_name="terradev-mcp",
-                        server_version="1.6.0",
+                        server_version="2.0.1",
                         capabilities=self._server.get_capabilities(
                             notification_options=NotificationOptions(),
                             experimental_capabilities=None,
@@ -2521,7 +3697,7 @@ async def run_stdio():
             write_stream,
             InitializationOptions(
                 server_name="terradev-mcp",
-                server_version="1.6.0",
+                server_version="2.0.1",
                 capabilities=server.get_capabilities(
                     notification_options=None,
                     experimental_capabilities=None,

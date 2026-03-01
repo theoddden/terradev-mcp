@@ -1,21 +1,19 @@
-# Terradev MCP Server v1.5.2
+# Terradev MCP Server v2.0.1
 
-GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NIXL KV transfer, and Terraform-powered parallel GPU provisioning** across 15 cloud providers.
+GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NIXL KV transfer, and Terraform-powered parallel GPU provisioning** across 19 cloud providers.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/theoddden/terradev-mcp/main/demo/terradev-mcp-demo.gif" alt="Terradev MCP Demo" width="800">
 </p>
 
-## What's New in v1.5
+## What's New in v2.0.1
 
-- **Ray Serve LLM Integration**: Wide Expert Parallelism (EP) and disaggregated Prefill/Decode deployment via Ray Serve
-- **Expert Parallelism (EP)**: Distribute MoE experts across GPUs with EPLB load balancing and Dual-Batch Overlap
-- **NIXL KV Connector**: Zero-copy GPU-to-GPU KV cache transfer over RDMA/NVLink for disaggregated serving
-- **DeepEP + DeepGEMM**: Auto-configured environment variables for optimized MoE kernels
-- **MoE-Aware Orchestrator**: Weight vs active memory distinction (744B total, 40B active) for accurate scheduling
-- **EP Group Routing**: Inference router tracks expert ranges per rank and routes to the GPU hosting target experts
-- **SGLang Lifecycle**: Real SSH/systemd server management with EP/EPLB/DBO flags
-- **Transport-Aware P/D Routing**: NIXL+RDMA > NIXL > LMCache scoring for KV cache handoff
+- **19 Cloud Providers**: Added Alibaba Cloud, OVHcloud, FluidStack, Hetzner, SiliconFlow (total: 19 providers)
+- **69 MCP Tools**: Full training lifecycle, inference deployment, GitOps, orchestrator, warm pools, cost scaler, workflows
+- **vLLM Cost Optimizations**: KV Cache Offloading (9x throughput), MTP Speculative Decoding (2.8x speed), Sleep Mode (18-200x faster wake), Multi-LoRA MoE serving
+- **Agent-Oriented**: suggest_action fields, recommend fields, requires_confirmation gates, estimated_cost in responses
+- **MCP Resources**: active_context, instances, jobs, spend, alerts
+- **Workflow Pipelines**: YAML declarative pipelines with templates
 
 ### Previous Releases
 - **Local GPU Discovery**: Scan local machines for available GPUs (Mac Mini M4 + RTX 4090 = 48GB pool!)
@@ -38,7 +36,7 @@ GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NI
 
 ### Prerequisites
 
-1. Install Terradev CLI (v3.3.0+):
+1. Install Terradev CLI (v3.5.0+):
 ```bash
 pip install terradev-cli
 # For all providers + HF Spaces:
@@ -365,7 +363,7 @@ Terradev v1.5 integrates the full MoE serving stack:
 
 ## Supported Cloud Providers
 
-RunPod, Vast.ai, AWS, GCP, Azure, Lambda Labs, CoreWeave, TensorDock, Oracle Cloud, Crusoe Cloud, DigitalOcean, HyperStack
+RunPod, Vast.ai, AWS, GCP, Azure, Lambda Labs, CoreWeave, TensorDock, Oracle Cloud, Crusoe Cloud, DigitalOcean, HyperStack, Alibaba Cloud, OVHcloud, FluidStack, Hetzner, SiliconFlow, Baseten, HuggingFace
 
 ## Environment Variables
 
@@ -400,6 +398,6 @@ Full multi-cloud setup:
 ## Links
 
 - [GitHub](https://github.com/theoddden/Terradev)
-- [PyPI](https://pypi.org/project/terradev-cli/) (v3.3.0)
-- [NPM](https://www.npmjs.com/package/terradev-mcp) (v1.5.2)
+- [PyPI](https://pypi.org/project/terradev-cli/) (v3.5.0)
+- [NPM](https://www.npmjs.com/package/terradev-mcp) (v2.0.1)
 - [Docs](https://theodden.github.io/Terradev/)

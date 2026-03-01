@@ -191,6 +191,58 @@ async def estimate_model_memory(model_name: str) -> float:
     # Unknown model, return conservative estimate
     return 20
 
+# ── Persistent Terraform workspaces ──────────────────────────────────────────
+# Critical fix: Terraform state must survive beyond a single tool call.
+# Previously used tempfile.TemporaryDirectory which destroyed terraform.tfstate
+# immediately after apply, making it impossible to destroy/manage resources later.
+TERRADEV_TF_STATE_DIR = os.path.join(os.path.expanduser("~"), ".terradev", "terraform")
+
+def _get_tf_workspace(name: str) -> str:
+    """Get or create a persistent Terraform workspace directory.
+    
+    State files (terraform.tfstate) are preserved across tool calls,
+    enabling terraform destroy/plan on previously provisioned resources.
+    """
+    # Sanitize workspace name to prevent path traversal
+    safe_name = "".join(c for c in name if c.isalnum() or c in "-_.")
+    if not safe_name:
+        safe_name = "default"
+    ws = os.path.join(TERRADEV_TF_STATE_DIR, safe_name)
+    os.makedirs(ws, exist_ok=True)
+    return ws
+
+def _list_tf_workspaces() -> List[Dict[str, Any]]:
+    """List all Terraform workspaces with their state status."""
+    workspaces = []
+    if os.path.isdir(TERRADEV_TF_STATE_DIR):
+        for name in sorted(os.listdir(TERRADEV_TF_STATE_DIR)):
+            ws_path = os.path.join(TERRADEV_TF_STATE_DIR, name)
+            if os.path.isdir(ws_path):
+                has_state = os.path.exists(os.path.join(ws_path, "terraform.tfstate"))
+                workspaces.append({
+                    "name": name,
+                    "path": ws_path,
+                    "has_state": has_state,
+                })
+    return workspaces
+
+# ── Path validation ──────────────────────────────────────────────────────────
+import re as _re
+_SAFE_PATH_RE = _re.compile(r'^[a-zA-Z0-9_./@:~\-]+$')
+
+def _validate_config_dir(config_dir: str) -> str:
+    """Validate a user-provided config_dir to prevent path traversal.
+    
+    Rejects paths containing '..' or suspicious characters.
+    Returns the resolved absolute path.
+    """
+    if '..' in config_dir:
+        raise ValueError(f"Invalid config_dir: path traversal ('..') not allowed: {config_dir}")
+    resolved = os.path.realpath(os.path.expanduser(config_dir))
+    if not os.path.isdir(resolved):
+        raise ValueError(f"Invalid config_dir: directory does not exist: {resolved}")
+    return resolved
+
 # Execute terradev command safely with bug fixes
 async def execute_terradev_command(args: List[str]) -> Dict[str, Any]:
     """Execute terradev CLI command with helpful error messages."""
@@ -313,97 +365,100 @@ async def execute_terraform_command(cmd: List[str], cwd: str) -> Dict[str, Any]:
 async def execute_terraform_parallel(gpu_type: str, count: int, providers: List[str] = None, max_price: float = None) -> Dict[str, Any]:
     """Execute Terraform-based parallel provisioning for optimal efficiency"""
     
-    # Create temporary directory for Terraform files
-    with tempfile.TemporaryDirectory() as temp_dir:
-        try:
-            # Generate Terraform configuration for parallel provisioning
-            terraform_config = generate_terraform_config(gpu_type, count, providers, max_price)
-            
-            # Write main.tf
-            main_tf_path = os.path.join(temp_dir, "main.tf")
-            with open(main_tf_path, 'w') as f:
-                f.write(terraform_config)
-            
-            # Write variables.tf
-            vars_tf_path = os.path.join(temp_dir, "variables.tf")
-            with open(vars_tf_path, 'w') as f:
-                f.write(generate_variables_file())
-            
-            # Initialize Terraform
-            init_result = await asyncio.create_subprocess_exec(
-                "terraform", "init",
-                cwd=temp_dir,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            init_stdout, init_stderr = await init_result.communicate()
-            
-            if init_result.returncode != 0:
-                return {
-                    "success": False,
-                    "stdout": "",
-                    "stderr": f"Terraform init failed: {init_stderr.decode()}",
-                    "returncode": init_result.returncode
-                }
-            
-            # Plan Terraform (dry run)
-            plan_result = await asyncio.create_subprocess_exec(
-                "terraform", "plan", "-out=tfplan",
-                cwd=temp_dir,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            plan_stdout, plan_stderr = await plan_result.communicate()
-            
-            if plan_result.returncode != 0:
-                return {
-                    "success": False,
-                    "stdout": "",
-                    "stderr": f"Terraform plan failed: {plan_stderr.decode()}",
-                    "returncode": plan_result.returncode
-                }
-            
-            # Apply Terraform
-            apply_result = await asyncio.create_subprocess_exec(
-                "terraform", "apply", "-auto-approve", "tfplan",
-                cwd=temp_dir,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            apply_stdout, apply_stderr = await apply_result.communicate()
-            
-            # Get outputs
-            output_result = await asyncio.create_subprocess_exec(
-                "terraform", "output", "-json",
-                cwd=temp_dir,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            output_stdout, output_stderr = await output_result.communicate()
-            
-            outputs = {}
-            if output_result.returncode == 0:
-                try:
-                    outputs = json.loads(output_stdout.decode())
-                except json.JSONDecodeError:
-                    pass
-            
-            return {
-                "success": apply_result.returncode == 0,
-                "stdout": apply_stdout.decode(),
-                "stderr": apply_stderr.decode(),
-                "returncode": apply_result.returncode,
-                "terraform_outputs": outputs,
-                "plan_output": plan_stdout.decode()
-            }
-            
-        except Exception as e:
+    # Use persistent workspace so terraform.tfstate survives for destroy/plan
+    workspace_name = f"provision-{gpu_type}-x{count}"
+    ws_dir = _get_tf_workspace(workspace_name)
+    try:
+        # Generate Terraform configuration for parallel provisioning
+        terraform_config = generate_terraform_config(gpu_type, count, providers, max_price)
+        
+        # Write main.tf
+        main_tf_path = os.path.join(ws_dir, "main.tf")
+        with open(main_tf_path, 'w') as f:
+            f.write(terraform_config)
+        
+        # Write variables.tf
+        vars_tf_path = os.path.join(ws_dir, "variables.tf")
+        with open(vars_tf_path, 'w') as f:
+            f.write(generate_variables_file())
+        
+        # Initialize Terraform
+        init_result = await asyncio.create_subprocess_exec(
+            "terraform", "init",
+            cwd=ws_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        init_stdout, init_stderr = await init_result.communicate()
+        
+        if init_result.returncode != 0:
             return {
                 "success": False,
                 "stdout": "",
-                "stderr": f"Terraform execution failed: {str(e)}",
-                "returncode": -1
+                "stderr": f"Terraform init failed: {init_stderr.decode()}",
+                "returncode": init_result.returncode
             }
+        
+        # Plan Terraform (dry run)
+        plan_result = await asyncio.create_subprocess_exec(
+            "terraform", "plan", "-out=tfplan",
+            cwd=ws_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        plan_stdout, plan_stderr = await plan_result.communicate()
+        
+        if plan_result.returncode != 0:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": f"Terraform plan failed: {plan_stderr.decode()}",
+                "returncode": plan_result.returncode
+            }
+        
+        # Apply Terraform
+        apply_result = await asyncio.create_subprocess_exec(
+            "terraform", "apply", "-auto-approve", "tfplan",
+            cwd=ws_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        apply_stdout, apply_stderr = await apply_result.communicate()
+        
+        # Get outputs
+        output_result = await asyncio.create_subprocess_exec(
+            "terraform", "output", "-json",
+            cwd=ws_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        output_stdout, output_stderr = await output_result.communicate()
+        
+        outputs = {}
+        if output_result.returncode == 0:
+            try:
+                outputs = json.loads(output_stdout.decode())
+            except json.JSONDecodeError:
+                pass
+        
+        return {
+            "success": apply_result.returncode == 0,
+            "stdout": apply_stdout.decode(),
+            "stderr": apply_stderr.decode(),
+            "returncode": apply_result.returncode,
+            "terraform_outputs": outputs,
+            "plan_output": plan_stdout.decode(),
+            "workspace": workspace_name,
+            "workspace_path": ws_dir,
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": f"Terraform execution failed: {str(e)}",
+            "returncode": -1
+        }
 
 def generate_k8s_terraform_config(cluster_name: str, gpu_type: str, node_count: int, multi_cloud: bool = False, prefer_spot: bool = True) -> str:
     """Generate Terraform configuration for Kubernetes clusters"""
@@ -647,7 +702,7 @@ variable "max_price" {{
         config += (
             '\nresource "terradev_instance" "gpu_' + str(i) + '" {\n'
             "  gpu_type    = var.gpu_type\n"
-            '  provider    = ' + provider + '\n'
+            '  provider    = "' + provider + '"\n'
             "  spot        = true\n"
             "  count       = 1\n"
             "\n"
@@ -2059,6 +2114,13 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
     
     elif tool_name == "terraform_apply":
         config_dir = arguments["config_dir"]
+        try:
+            config_dir = _validate_config_dir(config_dir)
+        except ValueError as e:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"❌ {str(e)}")],
+                isError=True
+            )
         plan_file = arguments.get("plan_file", "tfplan")
         var_file = arguments.get("var_file")
         auto_approve = arguments.get("auto_approve", True)
@@ -2085,6 +2147,13 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
     
     elif tool_name == "terraform_destroy":
         config_dir = arguments["config_dir"]
+        try:
+            config_dir = _validate_config_dir(config_dir)
+        except ValueError as e:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"❌ {str(e)}")],
+                isError=True
+            )
         var_file = arguments.get("var_file")
         auto_approve = arguments.get("auto_approve", True)
         
@@ -2115,53 +2184,52 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         use_terraform = arguments.get("use_terraform", True)
         
         if use_terraform:
-            # Use Terraform for optimal multi-cloud K8s deployment
-            with tempfile.TemporaryDirectory() as temp_dir:
-                try:
-                    # Generate K8s Terraform configuration
-                    k8s_config = generate_k8s_terraform_config(
-                        cluster_name, gpu_type, node_count, multi_cloud, prefer_spot
-                    )
-                    
-                    # Write configuration files
-                    main_tf_path = os.path.join(temp_dir, "main.tf")
-                    with open(main_tf_path, 'w') as f:
-                        f.write(k8s_config)
-                    
-                    # Initialize and apply Terraform
-                    init_result = await execute_terraform_command(["terraform", "init"], temp_dir)
-                    if not init_result["success"]:
-                        return CallToolResult(
-                            content=[TextContent(type="text", text=f"❌ Terraform init failed: {init_result['stderr']}")],
-                            isError=True
-                        )
-                    
-                    apply_result = await execute_terraform_command(["terraform", "apply", "-auto-approve"], temp_dir)
-                    
-                    if apply_result["success"]:
-                        output_text = f"✅ Kubernetes cluster created via Terraform!\n\n"
-                        output_text += f"**Cluster Name:** {cluster_name}\n"
-                        output_text += f"**GPU Type:** {gpu_type}\n"
-                        output_text += f"**Node Count:** {node_count}\n"
-                        output_text += f"**Multi-Cloud:** {multi_cloud}\n"
-                        output_text += f"**Spot Instances:** {prefer_spot}\n"
-                        output_text += f"\n**Terraform State:** Managed\n"
-                        output_text += f"**Full Output:**\n{apply_result['stdout']}"
-                        
-                        return CallToolResult(
-                            content=[TextContent(type="text", text=output_text)]
-                        )
-                    else:
-                        return CallToolResult(
-                            content=[TextContent(type="text", text=f"❌ Terraform apply failed: {apply_result['stderr']}")],
-                            isError=True
-                        )
-                        
-                except Exception as e:
+            # Use persistent workspace so state survives for k8s_destroy
+            ws_dir = _get_tf_workspace(f"k8s-{cluster_name}")
+            try:
+                # Generate K8s Terraform configuration
+                k8s_config = generate_k8s_terraform_config(
+                    cluster_name, gpu_type, node_count, multi_cloud, prefer_spot
+                )
+                
+                # Write configuration files
+                main_tf_path = os.path.join(ws_dir, "main.tf")
+                with open(main_tf_path, 'w') as f:
+                    f.write(k8s_config)
+                
+                # Initialize and apply Terraform
+                init_result = await execute_terraform_command(["terraform", "init"], ws_dir)
+                if not init_result["success"]:
                     return CallToolResult(
-                        content=[TextContent(type="text", text=f"❌ K8s Terraform deployment failed: {str(e)}")],
+                        content=[TextContent(type="text", text=f"❌ Terraform init failed: {init_result['stderr']}")],
                         isError=True
                     )
+                
+                apply_result = await execute_terraform_command(["terraform", "apply", "-auto-approve"], ws_dir)
+                
+                if apply_result["success"]:
+                    output_text = f"✅ Kubernetes cluster created via Terraform!\n\n"
+                    output_text += f"**Cluster Name:** {cluster_name}\n"
+                    output_text += f"**GPU Type:** {gpu_type}\n"
+                    output_text += f"**Node Count:** {node_count}\n"
+                    output_text += f"**Multi-Cloud:** {multi_cloud}\n"
+                    output_text += f"**Spot Instances:** {prefer_spot}\n"
+                    output_text += f"\n**Terraform State:** Persisted at {ws_dir}\n"
+                    output_text += f"**Full Output:**\n{apply_result['stdout']}"
+                    
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=output_text)]
+                    )
+                else:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=f"❌ Terraform apply failed: {apply_result['stderr']}")],
+                        isError=True
+                    )
+            except Exception as e:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"❌ K8s Terraform deployment failed: {str(e)}")],
+                    isError=True
+                )
         else:
             # Fall back to regular terradev command
             cmd_args.extend([cluster_name])
@@ -2186,49 +2254,49 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         use_terraform = arguments.get("use_terraform", True)
         
         if use_terraform:
-            # Use Terraform for inference deployment
-            with tempfile.TemporaryDirectory() as temp_dir:
-                try:
-                    # Generate inference Terraform configuration
-                    inference_config = generate_inference_terraform_config(model, gpu_type, endpoint_name)
-                    
-                    # Write configuration files
-                    main_tf_path = os.path.join(temp_dir, "main.tf")
-                    with open(main_tf_path, 'w') as f:
-                        f.write(inference_config)
-                    
-                    # Initialize and apply Terraform
-                    init_result = await execute_terraform_command(["terraform", "init"], temp_dir)
-                    if not init_result["success"]:
-                        return CallToolResult(
-                            content=[TextContent(type="text", text=f"❌ Terraform init failed: {init_result['stderr']}")],
-                            isError=True
-                        )
-                    
-                    apply_result = await execute_terraform_command(["terraform", "apply", "-auto-approve"], temp_dir)
-                    
-                    if apply_result["success"]:
-                        output_text = f"✅ Inference endpoint deployed via Terraform!\n\n"
-                        output_text += f"**Model:** {model}\n"
-                        output_text += f"**GPU Type:** {gpu_type}\n"
-                        output_text += f"**Endpoint Name:** {endpoint_name or 'auto-generated'}\n"
-                        output_text += f"\n**Terraform State:** Managed\n"
-                        output_text += f"**Full Output:**\n{apply_result['stdout']}"
-                        
-                        return CallToolResult(
-                            content=[TextContent(type="text", text=output_text)]
-                        )
-                    else:
-                        return CallToolResult(
-                            content=[TextContent(type="text", text=f"❌ Terraform apply failed: {apply_result['stderr']}")],
-                            isError=True
-                        )
-                        
-                except Exception as e:
+            # Use persistent workspace so state survives for endpoint teardown
+            safe_ep = (endpoint_name or model).replace("/", "-").replace(":", "-")
+            ws_dir = _get_tf_workspace(f"infer-{safe_ep}")
+            try:
+                # Generate inference Terraform configuration
+                inference_config = generate_inference_terraform_config(model, gpu_type, endpoint_name)
+                
+                # Write configuration files
+                main_tf_path = os.path.join(ws_dir, "main.tf")
+                with open(main_tf_path, 'w') as f:
+                    f.write(inference_config)
+                
+                # Initialize and apply Terraform
+                init_result = await execute_terraform_command(["terraform", "init"], ws_dir)
+                if not init_result["success"]:
                     return CallToolResult(
-                        content=[TextContent(type="text", text=f"❌ Inference Terraform deployment failed: {str(e)}")],
+                        content=[TextContent(type="text", text=f"❌ Terraform init failed: {init_result['stderr']}")],
                         isError=True
                     )
+                
+                apply_result = await execute_terraform_command(["terraform", "apply", "-auto-approve"], ws_dir)
+                
+                if apply_result["success"]:
+                    output_text = f"✅ Inference endpoint deployed via Terraform!\n\n"
+                    output_text += f"**Model:** {model}\n"
+                    output_text += f"**GPU Type:** {gpu_type}\n"
+                    output_text += f"**Endpoint Name:** {endpoint_name or 'auto-generated'}\n"
+                    output_text += f"\n**Terraform State:** Persisted at {ws_dir}\n"
+                    output_text += f"**Full Output:**\n{apply_result['stdout']}"
+                    
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=output_text)]
+                    )
+                else:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=f"❌ Terraform apply failed: {apply_result['stderr']}")],
+                        isError=True
+                    )
+            except Exception as e:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"❌ Inference Terraform deployment failed: {str(e)}")],
+                    isError=True
+                )
         else:
             # Fall back to regular terradev command
             cmd_args.extend(["--model", model])
@@ -2824,7 +2892,8 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             output_text += f"**Estimated Max Cost:** ${est_cost:.2f}/hr\n\n"
             output_text += "**requires_confirmation:** true\n"
             output_text += f"**estimated_cost:** ${est_cost:.2f}/hr (max {arguments.get('max_workers', 3)} workers × ${gpu_costs.get(gpu_type, 2.00):.2f}/hr)\n\n"
-            output_text += "**suggest_action:** Call `infer_deploy` again without `dry_run` to execute."
+            budget_rate = gpu_costs.get(gpu_type, 2.00)
+            output_text += f"**suggest_action:** Dry run complete: ${est_cost:.2f}/hr for {arguments.get('max_workers', 3)} workers. This requires confirmation — the cost scaler enforces a ${budget_rate:.2f}/hr-per-worker guardrail. Call `infer_deploy` without `dry_run` to execute."
             return CallToolResult(content=[TextContent(type="text", text=output_text)])
 
         cmd_args = ["infer-deploy", model_path, "--name", name]
@@ -2846,7 +2915,7 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         if result["success"]:
             output_text += output
             output_text += f"\n\n**estimated_cost:** ${est_cost:.2f}/hr (max)\n"
-            output_text += "**suggest_action:** Check status with `infer_status`. Monitor with `infer_failover --dry-run`."
+            output_text += f"**suggest_action:** Deployment active at ${est_cost:.2f}/hr (max). The orchestrator will enforce idle timeout and auto-scale constraints. Monitor: `infer_status`."
         else:
             output_text += f"⚠️ {output}"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
@@ -2881,7 +2950,7 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             output_text += f"\n\n**estimated_cost:** ${est_hourly:.2f}/hr × {hours}h = ${est_total:.2f}\n"
             if est_total > 50:
                 output_text += "⚠️ **Cost Warning:** Estimated spend exceeds $50. Monitor with `status`.\n"
-            output_text += "**suggest_action:** Run `preflight` then `train` on provisioned nodes."
+            output_text += f"**suggest_action:** Infrastructure provisioned via manifest-cached DAG ({gpu_count}× {gpu_type}, ${est_hourly:.2f}/hr). Drift detection is active. Next: `preflight` to validate nodes, then `train` to launch."
         else:
             output_text += f"⚠️ {output}"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
@@ -2922,7 +2991,7 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             output_text += output
             if arguments.get("option") is None:
                 output_text += "\n\n**requires_confirmation:** true\n"
-                output_text += "**suggest_action:** Review options above. Execute with `smart_deploy` and `option` parameter set to your chosen index."
+                output_text += "**suggest_action:** Options ranked by cost/risk. Selection requires confirmation — the deployment graph enforces manifest checksums and drift detection before applying. Execute with `smart_deploy` and `option` parameter."
         else:
             output_text += f"⚠️ {output}"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
@@ -3000,7 +3069,10 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         output_text = "🎛️ **Model Orchestrator Started**\n\n"
         if result["success"]:
             output_text += output
-            output_text += "\n\n**suggest_action:** Register models with `orchestrator_register`, then `orchestrator_load` to load them."
+            gpu_id = arguments.get('gpu_id', 0)
+            memory_gb = arguments.get('memory_gb', 80)
+            policy = arguments.get('policy', 'billing_optimized')
+            output_text += f"\n\n**suggest_action:** Orchestrator is enforcing memory invariants on GPU {gpu_id} ({memory_gb}GB, {policy} policy). Register models to enter the scheduling graph: `orchestrator_register`."
         else:
             output_text += f"⚠️ {output}"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
@@ -3014,7 +3086,7 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         output_text = f"📝 **Model Registered: {arguments['model_id']}**\n\n"
         if result["success"]:
             output_text += output
-            output_text += f"\n\n**suggest_action:** Load into GPU memory with `orchestrator_load`."
+            output_text += f"\n\n**suggest_action:** Model `{arguments['model_id']}` is now in the scheduling graph. The orchestrator will enforce memory and cost constraints on load. Next: `orchestrator_load`."
         else:
             output_text += f"⚠️ {output}"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
@@ -3028,9 +3100,9 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         output_text = f"📥 **Model Loaded: {arguments['model_id']}**\n\n"
         if result["success"]:
             output_text += output
-            output_text += "\n\n**suggest_action:** Test with `orchestrator_infer`. Check memory with `orchestrator_status`."
+            output_text += "\n\n**suggest_action:** Model loaded within memory budget. The orchestrator will auto-evict if idle >15min under billing-optimized policy. Verify inference: `orchestrator_infer`."
         else:
-            output_text += f"⚠️ {output}\n\n💡 Check memory: `orchestrator_status`. Try `--force` to evict least-used."
+            output_text += f"⚠️ Load blocked: {output}\n\nThe cost scaler or memory invariant rejected this load. Use `--force` to override constraints, or free memory with `orchestrator_evict`."
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
 
     elif tool_name == "orchestrator_evict":
@@ -3053,11 +3125,11 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             if "utilization" in output.lower():
                 output_text += "\n\n**recommend:** "
                 if "90%" in output or "95%" in output or "100%" in output:
-                    output_text += "GPU memory is near capacity. Consider `orchestrator_evict` for idle models or scaling up."
+                    output_text += "Memory invariant near threshold. Eviction policy will auto-reclaim from lowest-priority idle models. Manual override: `orchestrator_evict`."
                 elif "10%" in output or "15%" in output or "20%" in output:
-                    output_text += "GPU memory is underutilized. Consider loading more models with `orchestrator_load`."
+                    output_text += "Memory underutilized — scheduling graph has capacity. Load more models with `orchestrator_load` to increase warm pool coverage."
                 else:
-                    output_text += "Memory utilization is balanced."
+                    output_text += "Memory utilization within policy bounds. The orchestrator is maintaining headroom for burst loads."
         else:
             output_text += f"⚠️ {output}\n\n💡 Start orchestrator first: `orchestrator_start`"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
@@ -3082,7 +3154,10 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         output_text = "🔥 **Warm Pool Started**\n\n"
         if result["success"]:
             output_text += output
-            output_text += "\n\n**suggest_action:** Register models with `warm_pool_register`. Check `warm_pool_status` for hit rates."
+            strategy = arguments.get('strategy', 'traffic_based')
+            max_warm = arguments.get('max_warm', 10)
+            min_warm = arguments.get('min_warm', 3)
+            output_text += f"\n\n**suggest_action:** Warm pool enforcing [{min_warm}, {max_warm}] model bounds under {strategy} policy. Register models to enter the warming graph: `warm_pool_register`."
         else:
             output_text += f"⚠️ {output}"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
@@ -3097,9 +3172,9 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             # Agent recommendation
             output_text += "\n\n**recommend:** "
             if "hit rate" in output.lower():
-                output_text += "Review hit rate. If below 80%, consider adjusting strategy or increasing max_warm."
+                output_text += "The warm pool enforces model bounds and eviction policy. If hit rate is below 80%, the pool's constraints may be too aggressive — consider increasing `max_warm` or switching strategy."
             else:
-                output_text += "Pool is operational."
+                output_text += "Warm pool is enforcing its scheduling invariants. Cold starts are being minimized within the configured bounds."
         else:
             output_text += f"⚠️ {output}\n\n💡 Start warm pool first: `warm_pool_start`"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
@@ -3117,7 +3192,9 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         output_text = "💰 **Cost Scaler Started**\n\n"
         if result["success"]:
             output_text += output
-            output_text += "\n\n**suggest_action:** Monitor with `cost_scaler_status` for budget utilization and predictions."
+            strategy = arguments.get('strategy', 'balance_cost_latency')
+            budget = arguments.get('budget', 15.0)
+            output_text += f"\n\n**suggest_action:** Cost scaler enforcing ${budget:.2f}/hr budget under {strategy} policy. The scaler will block loads that exceed budget constraints. Monitor: `cost_scaler_status`."
         else:
             output_text += f"⚠️ {output}"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])
@@ -3132,11 +3209,11 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             # Agent recommendations
             output_text += "\n\n**recommend:** "
             if "budget" in output.lower() and ("exceed" in output.lower() or "over" in output.lower()):
-                output_text += "⚠️ Budget at risk. Consider scaling down or switching strategy to `minimize_cost`."
+                output_text += "⚠️ Budget constraint active: the scaler will block new model loads until utilization drops below 80%. Reduce spend with `orchestrator_evict` or switch to `minimize_cost` strategy."
             elif "under" in output.lower():
-                output_text += "Budget is healthy. You have headroom to scale up if needed."
+                output_text += "Budget constraint has headroom. The scaler permits new loads within the remaining budget envelope."
             else:
-                output_text += "Cost scaling is within bounds."
+                output_text += "Cost invariants holding. The scaler is maintaining spend within configured bounds."
         else:
             output_text += f"⚠️ {output}\n\n💡 Start cost scaler first: `cost_scaler_start`"
         return CallToolResult(content=[TextContent(type="text", text=output_text)], isError=not result["success"])

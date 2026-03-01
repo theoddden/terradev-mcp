@@ -2512,6 +2512,710 @@ async def handle_list_tools() -> ListToolsResult:
                 "required": ["source_uri", "target_regions", "size_gb"]
             }
         ),
+
+        # ── v5.0.0: HuggingFace Hub Full Service ─────────────────────────
+
+        Tool(
+            name="hf_list_models",
+            description="Search and browse HuggingFace Hub models. Filter by author, task, library. Returns model ID, downloads, likes, and tags.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "author": {"type": "string", "description": "Filter by author/org (e.g. meta-llama, mistralai)"},
+                    "search": {"type": "string", "description": "Search query (e.g. 'code generation', 'llama')"},
+                    "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    "api_key": {"type": "string", "description": "HuggingFace API token"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="hf_list_datasets",
+            description="Search and browse HuggingFace Hub datasets. Filter by author and search query.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "author": {"type": "string", "description": "Filter by author/org"},
+                    "search": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "description": "Max results", "default": 20},
+                    "api_key": {"type": "string", "description": "HuggingFace API token"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="hf_model_info",
+            description="Get detailed model info: architecture, size, downloads, license, tags, pipeline_tag, and model card.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID (e.g. meta-llama/Llama-3.3-70B-Instruct)"},
+                    "api_key": {"type": "string", "description": "HuggingFace API token"}
+                },
+                "required": ["model_id", "api_key"]
+            }
+        ),
+        Tool(
+            name="hf_create_endpoint",
+            description="Create a HuggingFace Inference Endpoint (paid GPU endpoint). Supports custom GPU types, regions, and scaling.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID"},
+                    "endpoint_name": {"type": "string", "description": "Endpoint name"},
+                    "instance_type": {"type": "string", "description": "Instance type (e.g. nvidia-a100, nvidia-l4)"},
+                    "instance_size": {"type": "string", "description": "Instance size (e.g. x1, x2, x4)"},
+                    "region": {"type": "string", "description": "Region (e.g. us-east-1, eu-west-1)", "default": "us-east-1"},
+                    "min_replicas": {"type": "integer", "description": "Min replicas (0 for scale-to-zero)", "default": 0},
+                    "max_replicas": {"type": "integer", "description": "Max replicas", "default": 1},
+                    "api_key": {"type": "string", "description": "HuggingFace API token"}
+                },
+                "required": ["model_id", "endpoint_name", "instance_type", "api_key"]
+            }
+        ),
+        Tool(
+            name="hf_list_endpoints",
+            description="List all active HuggingFace Inference Endpoints with status, URL, and cost.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "HuggingFace API token"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="hf_endpoint_info",
+            description="Get detailed info about a specific HuggingFace Inference Endpoint: status, URL, scaling config, cost.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint_name": {"type": "string", "description": "Endpoint name"},
+                    "api_key": {"type": "string", "description": "HuggingFace API token"}
+                },
+                "required": ["endpoint_name", "api_key"]
+            }
+        ),
+        Tool(
+            name="hf_delete_endpoint",
+            description="Delete a HuggingFace Inference Endpoint.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint_name": {"type": "string", "description": "Endpoint name to delete"},
+                    "api_key": {"type": "string", "description": "HuggingFace API token"}
+                },
+                "required": ["endpoint_name", "api_key"]
+            }
+        ),
+        Tool(
+            name="hf_endpoint_infer",
+            description="Run inference on a HuggingFace Inference Endpoint. Supports text generation, embeddings, and custom inputs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "endpoint_name": {"type": "string", "description": "Endpoint name"},
+                    "inputs": {"type": "string", "description": "Input text or prompt"},
+                    "parameters": {"type": "object", "description": "Generation parameters (max_new_tokens, temperature, etc.)"},
+                    "api_key": {"type": "string", "description": "HuggingFace API token"}
+                },
+                "required": ["endpoint_name", "inputs", "api_key"]
+            }
+        ),
+
+        # ── v5.0.0: HF Smart Templates ───────────────────────────────────
+
+        Tool(
+            name="hf_smart_template",
+            description="Auto-generate an optimized deployment template for any HuggingFace model. Analyzes model size, architecture, and quantization to select optimal hardware and generate ready-to-deploy configs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID (e.g. meta-llama/Llama-3.3-70B-Instruct)"},
+                    "template_type": {"type": "string", "description": "Template type", "enum": ["auto", "chat", "embedding", "vision", "audio"], "default": "auto"},
+                    "space_name": {"type": "string", "description": "Optional HF Space name for deployment"}
+                },
+                "required": ["model_id"]
+            }
+        ),
+        Tool(
+            name="hf_hardware_recommend",
+            description="Get hardware recommendation with cost breakdown for any HuggingFace model. Returns optimal GPU type, estimated cost, and performance score.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID"},
+                    "budget_constraint": {"type": "number", "description": "Max $/hr budget (optional)"}
+                },
+                "required": ["model_id"]
+            }
+        ),
+        Tool(
+            name="hf_hardware_compare",
+            description="Compare all hardware options for a HuggingFace model. Returns side-by-side cost, performance, and compatibility analysis.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "HuggingFace model ID"}
+                },
+                "required": ["model_id"]
+            }
+        ),
+
+        # ── v5.0.0: LangChain / LangGraph / LangSmith ────────────────────
+
+        Tool(
+            name="langchain_create_workflow",
+            description="Create a LangChain workflow with LangSmith monitoring integration.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "workflow_config": {"type": "object", "description": "Workflow configuration (name, steps, model, tools)"},
+                    "api_key": {"type": "string", "description": "LangChain/LangSmith API key"},
+                    "langsmith_api_key": {"type": "string", "description": "LangSmith API key for tracing"}
+                },
+                "required": ["workflow_config", "api_key"]
+            }
+        ),
+        Tool(
+            name="langchain_create_sglang_pipeline",
+            description="Create an SGLang model-serving pipeline via LangChain. Connects LangChain agents to SGLang inference endpoints.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pipeline_config": {"type": "object", "description": "Pipeline config (model, endpoint, temperature, max_tokens)"},
+                    "api_key": {"type": "string", "description": "LangChain API key"}
+                },
+                "required": ["pipeline_config", "api_key"]
+            }
+        ),
+        Tool(
+            name="langsmith_create_project",
+            description="Create a new LangSmith project for tracing and evaluation.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Project name"},
+                    "description": {"type": "string", "description": "Project description"},
+                    "api_key": {"type": "string", "description": "LangSmith API key"}
+                },
+                "required": ["name", "api_key"]
+            }
+        ),
+        Tool(
+            name="langsmith_get_workspaces",
+            description="List all LangSmith workspaces.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "LangSmith API key"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="langsmith_create_trace",
+            description="Create a trace in LangSmith for observability. Tracks input/output, latency, token usage, and cost.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "description": "Run ID to attach trace to"},
+                    "trace_data": {"type": "object", "description": "Trace data (name, inputs, outputs, metadata)"},
+                    "api_key": {"type": "string", "description": "LangSmith API key"}
+                },
+                "required": ["run_id", "trace_data", "api_key"]
+            }
+        ),
+        Tool(
+            name="langgraph_create_workflow",
+            description="Create a LangGraph stateful workflow with monitoring. Supports agent graphs, tool calling, and state persistence.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "graph_config": {"type": "object", "description": "Graph configuration (nodes, edges, state_schema)"},
+                    "api_key": {"type": "string", "description": "LangChain API key"},
+                    "langsmith_api_key": {"type": "string", "description": "LangSmith API key for tracing"}
+                },
+                "required": ["graph_config", "api_key"]
+            }
+        ),
+        Tool(
+            name="langgraph_orchestrator_worker",
+            description="Create an orchestrator-worker pattern workflow in LangGraph. The orchestrator delegates tasks to specialized worker agents.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "workflow_config": {"type": "object", "description": "Orchestrator-worker config (orchestrator_prompt, workers, routing_strategy)"},
+                    "api_key": {"type": "string", "description": "LangChain API key"}
+                },
+                "required": ["workflow_config", "api_key"]
+            }
+        ),
+        Tool(
+            name="langgraph_evaluation_workflow",
+            description="Create an evaluator-optimizer workflow in LangGraph. Generates outputs, evaluates quality, and iteratively improves.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "evaluation_config": {"type": "object", "description": "Evaluation config (generator_prompt, evaluator_criteria, max_iterations)"},
+                    "api_key": {"type": "string", "description": "LangChain API key"}
+                },
+                "required": ["evaluation_config", "api_key"]
+            }
+        ),
+        Tool(
+            name="langgraph_workflow_status",
+            description="Get the status and metrics of a LangGraph workflow execution.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "workflow_id": {"type": "string", "description": "Workflow ID to check"},
+                    "api_key": {"type": "string", "description": "LangChain API key"}
+                },
+                "required": ["workflow_id", "api_key"]
+            }
+        ),
+
+        # ── v5.0.0: W&B Enhanced ─────────────────────────────────────────
+
+        Tool(
+            name="wandb_create_dashboard",
+            description="Create a custom W&B dashboard with GPU metrics, training loss, and cost panels.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dashboard_config": {"type": "object", "description": "Dashboard config (name, panels, metrics)"},
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "entity": {"type": "string", "description": "W&B entity"}
+                },
+                "required": ["dashboard_config", "api_key"]
+            }
+        ),
+        Tool(
+            name="wandb_create_terradev_dashboard",
+            description="Auto-create a Terradev-specific W&B dashboard with GPU utilization, cost tracking, training metrics, and infrastructure panels.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "entity": {"type": "string", "description": "W&B entity"},
+                    "project": {"type": "string", "description": "W&B project name"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="wandb_create_report",
+            description="Create a W&B report with custom sections, charts, and narrative text.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "report_config": {"type": "object", "description": "Report config (title, sections, metrics, description)"},
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "entity": {"type": "string", "description": "W&B entity"}
+                },
+                "required": ["report_config", "api_key"]
+            }
+        ),
+        Tool(
+            name="wandb_create_terradev_report",
+            description="Auto-generate a Terradev infrastructure report: GPU costs, provider comparison, training efficiency, and recommendations.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "metrics_data": {"type": "object", "description": "Metrics data to include (gpu_costs, training_runs, provider_stats)"},
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "entity": {"type": "string", "description": "W&B entity"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="wandb_setup_alerts",
+            description="Set up custom W&B alerts for GPU metrics: cost thresholds, utilization drops, training anomalies.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "alert_config": {"type": "object", "description": "Alert config (metric, threshold, condition, notification_channel)"},
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "entity": {"type": "string", "description": "W&B entity"}
+                },
+                "required": ["alert_config", "api_key"]
+            }
+        ),
+        Tool(
+            name="wandb_create_terradev_alerts",
+            description="Auto-create standard Terradev alerts: GPU cost > budget, utilization < 50%, training loss spike, straggler detection.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "entity": {"type": "string", "description": "W&B entity"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+        Tool(
+            name="wandb_dashboard_status",
+            description="Get comprehensive W&B monitoring overview: dashboards, reports, alerts, active runs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "api_key": {"type": "string", "description": "W&B API key"},
+                    "entity": {"type": "string", "description": "W&B entity"}
+                },
+                "required": ["api_key"]
+            }
+        ),
+
+        # ── v5.0.0: Data Governance ───────────────────────────────────────
+
+        Tool(
+            name="governance_request_consent",
+            description="Request user consent for data movement across cloud regions. GDPR/SOC2 compliant consent tracking with audit trail.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string", "description": "User ID requesting consent"},
+                    "consent_type": {"type": "string", "description": "Consent type", "enum": ["data_staging", "cross_region", "third_party", "model_training"]},
+                    "dataset_name": {"type": "string", "description": "Dataset being moved"},
+                    "source_location": {"type": "string", "description": "Source region/provider"},
+                    "target_location": {"type": "string", "description": "Target region/provider"},
+                    "purpose": {"type": "string", "description": "Purpose of data movement"}
+                },
+                "required": ["user_id", "consent_type", "dataset_name", "purpose"]
+            }
+        ),
+        Tool(
+            name="governance_record_consent",
+            description="Record a consent response (granted or denied) for a pending consent request.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "request_id": {"type": "string", "description": "Consent request ID"},
+                    "user_id": {"type": "string", "description": "User ID"},
+                    "granted": {"type": "boolean", "description": "Whether consent was granted"},
+                    "conditions": {"type": "array", "description": "Conditions attached to consent", "items": {"type": "string"}}
+                },
+                "required": ["request_id", "user_id", "granted"]
+            }
+        ),
+        Tool(
+            name="governance_evaluate_opa",
+            description="Evaluate OPA (Open Policy Agent) policies for data access. Checks region restrictions, classification rules, and compliance requirements.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string", "description": "User ID to evaluate"},
+                    "dataset_name": {"type": "string", "description": "Dataset name"},
+                    "action": {"type": "string", "description": "Action to evaluate", "enum": ["read", "write", "move", "delete", "train"]},
+                    "target_location": {"type": "string", "description": "Target location for the action"}
+                },
+                "required": ["user_id", "dataset_name", "action"]
+            }
+        ),
+        Tool(
+            name="governance_move_data",
+            description="Move data with full governance audit trail. Requires prior consent and OPA policy approval. Tracks integrity, encryption, and compliance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string", "description": "User ID"},
+                    "consent_request_id": {"type": "string", "description": "Approved consent request ID"},
+                    "dataset_name": {"type": "string", "description": "Dataset to move"},
+                    "source_location": {"type": "string", "description": "Source location"},
+                    "target_location": {"type": "string", "description": "Target location"}
+                },
+                "required": ["user_id", "consent_request_id", "dataset_name", "source_location", "target_location"]
+            }
+        ),
+        Tool(
+            name="governance_movement_history",
+            description="Get data movement audit log. Filter by user, dataset, or time range.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string", "description": "Filter by user ID"},
+                    "dataset_name": {"type": "string", "description": "Filter by dataset"},
+                    "limit": {"type": "integer", "description": "Max records", "default": 50}
+                }
+            }
+        ),
+        Tool(
+            name="governance_compliance_report",
+            description="Generate comprehensive compliance report: consent stats, policy evaluations, data movements, violations. For GDPR/SOC2/HIPAA audits.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "Start date (ISO format, e.g. 2025-01-01)"},
+                    "end_date": {"type": "string", "description": "End date (ISO format, e.g. 2025-12-31)"}
+                },
+                "required": ["start_date", "end_date"]
+            }
+        ),
+
+        # ── v5.0.0: Cost Optimizer Deep ───────────────────────────────────
+
+        Tool(
+            name="cost_analyze",
+            description="Deep cost analysis of current GPU infrastructure: per-provider breakdown, utilization efficiency, waste identification, and optimization potential.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Lookback period in days", "default": 30}
+                }
+            }
+        ),
+        Tool(
+            name="cost_optimize_recommend",
+            description="Generate actionable cost optimization recommendations: spot migration, GPU right-sizing, provider arbitrage, idle shutdown, and density packing.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target_savings": {"type": "number", "description": "Target savings percentage (e.g. 0.3 for 30%)"},
+                    "constraints": {"type": "object", "description": "Constraints (min_gpus, max_latency_ms, required_providers)"}
+                }
+            }
+        ),
+        Tool(
+            name="cost_simulate",
+            description="Simulate cost optimization scenarios with ROI projections. Compare current vs optimized infrastructure costs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scenario": {"type": "object", "description": "Scenario config (gpu_type, provider, count, spot, hours)"},
+                    "compare_with": {"type": "object", "description": "Current config to compare against"}
+                },
+                "required": ["scenario"]
+            }
+        ),
+        Tool(
+            name="cost_budget_optimize",
+            description="Find optimal GPU deployment under a strict budget constraint. Uses ML-based cost prediction and spot risk assessment.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "budget": {"type": "number", "description": "Total budget in USD"},
+                    "gpu_type": {"type": "string", "description": "Required GPU type"},
+                    "gpu_count": {"type": "integer", "description": "Required GPU count", "default": 1},
+                    "hours": {"type": "number", "description": "Required runtime in hours", "default": 1.0},
+                    "allow_spot": {"type": "boolean", "description": "Allow spot instances", "default": True}
+                },
+                "required": ["budget"]
+            }
+        ),
+
+        # ── v5.0.0: Price Intelligence Extended ──────────────────────────
+
+        Tool(
+            name="price_trends",
+            description="Get GPU price trend analysis with delta (rate of change), gamma (acceleration), and annualized volatility. Identifies cheapest time windows.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "gpu_type": {"type": "string", "description": "GPU type", "enum": ["H100", "H200", "H800", "A100", "A10G", "L40S", "L4", "T4", "RTX4090", "V100S", "A6000", "MI300X"]},
+                    "hours": {"type": "integer", "description": "Hours of history", "default": 24}
+                },
+                "required": ["gpu_type"]
+            }
+        ),
+        Tool(
+            name="price_budget_optimize",
+            description="Budget-first price optimization with ML-based cost prediction. Finds cheapest deployment plan under budget.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "budget": {"type": "number", "description": "Budget in USD"},
+                    "gpu_type": {"type": "string", "description": "Required GPU type"},
+                    "gpu_count": {"type": "integer", "description": "GPU count", "default": 1},
+                    "hours": {"type": "number", "description": "Runtime hours", "default": 1.0}
+                },
+                "required": ["budget", "gpu_type"]
+            }
+        ),
+        Tool(
+            name="price_spot_risk",
+            description="Spot instance risk assessment per provider. Returns interruption probability, mean time to interruption, and recommended mitigation.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "gpu_type": {"type": "string", "description": "GPU type"},
+                    "provider": {"type": "string", "description": "Provider to assess (or 'all')"}
+                },
+                "required": ["gpu_type"]
+            }
+        ),
+
+        # ── v5.0.0: Training Orchestrator Extended ────────────────────────
+
+        Tool(
+            name="training_config_generate",
+            description="Generate a complete training configuration from a declarative spec. Auto-detects framework, sets optimal parallelism, and configures distributed training.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Training job name"},
+                    "framework": {"type": "string", "description": "Training framework", "enum": ["torchrun", "deepspeed", "accelerate", "megatron"], "default": "torchrun"},
+                    "script": {"type": "string", "description": "Training script path"},
+                    "nodes": {"type": "array", "description": "Node IPs", "items": {"type": "string"}},
+                    "gpus_per_node": {"type": "integer", "description": "GPUs per node", "default": 8},
+                    "from_provision": {"type": "string", "description": "Resolve from provision ('latest' or group ID)"},
+                    "deepspeed_config": {"type": "object", "description": "DeepSpeed config overrides"},
+                    "script_args": {"type": "string", "description": "Extra script arguments"}
+                },
+                "required": ["name", "script"]
+            }
+        ),
+        Tool(
+            name="training_launch_distributed",
+            description="Full distributed training launch with framework auto-detection, topology validation, and monitoring. Combines preflight + train + monitor in one operation.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Job name"},
+                    "script": {"type": "string", "description": "Training script"},
+                    "framework": {"type": "string", "description": "Framework", "enum": ["torchrun", "deepspeed", "accelerate", "megatron"], "default": "torchrun"},
+                    "from_provision": {"type": "string", "description": "Resolve nodes from provision ('latest' or group ID)"},
+                    "nodes": {"type": "array", "description": "Manual node IPs", "items": {"type": "string"}},
+                    "gpus_per_node": {"type": "integer", "description": "GPUs per node", "default": 8},
+                    "skip_preflight": {"type": "boolean", "description": "Skip preflight validation", "default": false}
+                },
+                "required": ["name", "script"]
+            }
+        ),
+
+        # ── v5.0.0: Training Monitor Extended ─────────────────────────────
+
+        Tool(
+            name="train_snapshot",
+            description="Get complete training monitoring snapshot: GPU metrics (utilization, memory, temp, power), training metrics (loss, grad_norm, lr, throughput), straggler detection, and cost estimate.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Training job ID"},
+                    "cost_rate": {"type": "number", "description": "$/GPU-hr for cost estimation", "default": 2.0}
+                },
+                "required": ["job_id"]
+            }
+        ),
+        Tool(
+            name="train_detect_stragglers",
+            description="Detect straggler nodes in distributed training. Identifies GPUs with significantly lower utilization that slow the whole job.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Training job ID"},
+                    "threshold": {"type": "number", "description": "Straggler threshold (0-1, default 0.7 = 70% of mean)", "default": 0.7}
+                },
+                "required": ["job_id"]
+            }
+        ),
+
+        # ── v5.0.0: Preflight Validator Extended ──────────────────────────
+
+        Tool(
+            name="preflight_report",
+            description="Generate full preflight validation report with pass/warn/fail per check. Covers GPU drivers, CUDA, NCCL, RDMA, network, disk, and Docker.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "nodes": {"type": "array", "description": "Node IPs", "items": {"type": "string"}},
+                    "from_provision": {"type": "string", "description": "Resolve nodes from provision ('latest' or group ID)"},
+                    "checks": {"type": "array", "description": "Specific checks to run", "items": {"type": "string"}}
+                }
+            }
+        ),
+        Tool(
+            name="preflight_gpu_check",
+            description="GPU-specific preflight validation: NVIDIA drivers, CUDA version, GPU count, NCCL version, peer-to-peer access, NVLink topology.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "nodes": {"type": "array", "description": "Node IPs", "items": {"type": "string"}},
+                    "from_provision": {"type": "string", "description": "Resolve nodes from provision"}
+                }
+            }
+        ),
+        Tool(
+            name="preflight_network_check",
+            description="Network-specific preflight validation: RDMA availability, InfiniBand status, inter-node bandwidth, latency matrix, firewall rules.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "nodes": {"type": "array", "description": "Node IPs", "items": {"type": "string"}},
+                    "from_provision": {"type": "string", "description": "Resolve nodes from provision"}
+                }
+            }
+        ),
+
+        # ── v5.0.0: Kubernetes Enhanced ───────────────────────────────────
+
+        Tool(
+            name="k8s_gpu_operator_install",
+            description="Install NVIDIA GPU Operator on a Kubernetes cluster. Configures driver containers, device plugin, DCGM exporter, and GPU Feature Discovery.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cluster_name": {"type": "string", "description": "Target cluster name"},
+                    "driver_version": {"type": "string", "description": "NVIDIA driver version (default: auto-detect)"},
+                    "namespace": {"type": "string", "description": "Install namespace", "default": "gpu-operator"}
+                },
+                "required": ["cluster_name"]
+            }
+        ),
+        Tool(
+            name="k8s_device_plugin",
+            description="Configure Kubernetes GPU device plugin settings: time-slicing, MIG strategy, and resource naming.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cluster_name": {"type": "string", "description": "Target cluster name"},
+                    "strategy": {"type": "string", "description": "Device plugin strategy", "enum": ["none", "time-slicing", "mig-single", "mig-mixed"], "default": "none"},
+                    "replicas": {"type": "integer", "description": "Time-slicing replicas per GPU", "default": 2}
+                },
+                "required": ["cluster_name"]
+            }
+        ),
+        Tool(
+            name="k8s_mig_configure",
+            description="Configure Multi-Instance GPU (MIG) partitioning on A100/H100 GPUs. Splits a single GPU into isolated instances for multi-tenant workloads.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cluster_name": {"type": "string", "description": "Target cluster name"},
+                    "mig_profile": {"type": "string", "description": "MIG profile", "enum": ["1g.5gb", "1g.10gb", "2g.10gb", "3g.20gb", "4g.20gb", "7g.40gb", "7g.80gb"]},
+                    "gpu_indices": {"type": "array", "description": "GPU indices to configure", "items": {"type": "integer"}}
+                },
+                "required": ["cluster_name", "mig_profile"]
+            }
+        ),
+        Tool(
+            name="k8s_time_slicing",
+            description="Configure GPU time-slicing for Kubernetes. Allows multiple pods to share a single GPU with configurable oversubscription.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cluster_name": {"type": "string", "description": "Target cluster name"},
+                    "replicas": {"type": "integer", "description": "Virtual GPUs per physical GPU", "default": 4},
+                    "oversubscribe": {"type": "boolean", "description": "Allow oversubscription", "default": True}
+                },
+                "required": ["cluster_name"]
+            }
+        ),
+        Tool(
+            name="k8s_monitoring_stack",
+            description="Deploy Prometheus + Grafana GPU monitoring stack with DCGM dashboards, Karpenter metrics, and GPU utilization alerts.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cluster_name": {"type": "string", "description": "Target cluster name"},
+                    "namespace": {"type": "string", "description": "Monitoring namespace", "default": "monitoring"},
+                    "grafana_password": {"type": "string", "description": "Grafana admin password"},
+                    "enable_alerting": {"type": "boolean", "description": "Enable GPU utilization alerts", "default": True}
+                },
+                "required": ["cluster_name"]
+            }
+        ),
     ]
     
     return ListToolsResult(tools=tools)
@@ -2641,6 +3345,68 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         "kserve_status": ["ml", "kserve", "status"],
         "egress_cheapest_route": ["egress", "route"],
         "egress_optimize_staging": ["egress", "optimize"],
+        # v5.0.0: HuggingFace Hub — handled by custom elif blocks
+        "hf_list_models": ["ml", "hf", "models"],
+        "hf_list_datasets": ["ml", "hf", "datasets"],
+        "hf_model_info": ["ml", "hf", "model-info"],
+        "hf_create_endpoint": ["ml", "hf", "create-endpoint"],
+        "hf_list_endpoints": ["ml", "hf", "list-endpoints"],
+        "hf_endpoint_info": ["ml", "hf", "endpoint-info"],
+        "hf_delete_endpoint": ["ml", "hf", "delete-endpoint"],
+        "hf_endpoint_infer": ["ml", "hf", "endpoint-infer"],
+        # v5.0.0: HF Smart Templates — handled by custom elif blocks
+        "hf_smart_template": ["ml", "hf", "smart-template"],
+        "hf_hardware_recommend": ["ml", "hf", "hardware-recommend"],
+        "hf_hardware_compare": ["ml", "hf", "hardware-compare"],
+        # v5.0.0: LangChain / LangGraph — handled by custom elif blocks
+        "langchain_create_workflow": ["ml", "langchain", "workflow"],
+        "langchain_create_sglang_pipeline": ["ml", "langchain", "sglang-pipeline"],
+        "langsmith_create_project": ["ml", "langsmith", "create-project"],
+        "langsmith_get_workspaces": ["ml", "langsmith", "workspaces"],
+        "langsmith_create_trace": ["ml", "langsmith", "trace"],
+        "langgraph_create_workflow": ["ml", "langgraph", "workflow"],
+        "langgraph_orchestrator_worker": ["ml", "langgraph", "orchestrator-worker"],
+        "langgraph_evaluation_workflow": ["ml", "langgraph", "evaluation"],
+        "langgraph_workflow_status": ["ml", "langgraph", "status"],
+        # v5.0.0: W&B Enhanced — handled by custom elif blocks
+        "wandb_create_dashboard": ["ml", "wandb", "create-dashboard"],
+        "wandb_create_terradev_dashboard": ["ml", "wandb", "terradev-dashboard"],
+        "wandb_create_report": ["ml", "wandb", "create-report"],
+        "wandb_create_terradev_report": ["ml", "wandb", "terradev-report"],
+        "wandb_setup_alerts": ["ml", "wandb", "setup-alerts"],
+        "wandb_create_terradev_alerts": ["ml", "wandb", "terradev-alerts"],
+        "wandb_dashboard_status": ["ml", "wandb", "dashboard-status"],
+        # v5.0.0: Data Governance — handled by custom elif blocks
+        "governance_request_consent": ["governance", "consent-request"],
+        "governance_record_consent": ["governance", "consent-record"],
+        "governance_evaluate_opa": ["governance", "evaluate-opa"],
+        "governance_move_data": ["governance", "move"],
+        "governance_movement_history": ["governance", "history"],
+        "governance_compliance_report": ["governance", "compliance-report"],
+        # v5.0.0: Cost Optimizer Deep — handled by custom elif blocks
+        "cost_analyze": ["cost", "analyze"],
+        "cost_optimize_recommend": ["cost", "recommend"],
+        "cost_simulate": ["cost", "simulate"],
+        "cost_budget_optimize": ["cost", "budget-optimize"],
+        # v5.0.0: Price Intelligence Extended — handled by custom elif blocks
+        "price_trends": ["price", "trends"],
+        "price_budget_optimize": ["price", "budget-optimize"],
+        "price_spot_risk": ["price", "spot-risk"],
+        # v5.0.0: Training Extended — handled by custom elif blocks
+        "training_config_generate": ["train", "config-generate"],
+        "training_launch_distributed": ["train", "launch-distributed"],
+        "train_snapshot": ["train", "snapshot"],
+        "train_detect_stragglers": ["train", "detect-stragglers"],
+        # v5.0.0: Preflight Extended — handled by custom elif blocks
+        "preflight_report": ["preflight", "report"],
+        "preflight_gpu_check": ["preflight", "gpu-check"],
+        "preflight_network_check": ["preflight", "network-check"],
+        # v5.0.0: Kubernetes Enhanced — handled by custom elif blocks
+        "k8s_gpu_operator_install": ["k8s", "gpu-operator"],
+        "k8s_device_plugin": ["k8s", "device-plugin"],
+        "k8s_mig_configure": ["k8s", "mig-configure"],
+        "k8s_time_slicing": ["k8s", "time-slicing"],
+        "k8s_monitoring_stack": ["k8s", "monitoring-stack"],
     }
     
     if tool_name not in command_map:
@@ -4861,6 +5627,1073 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             output_text += f"**Source:** {source_uri}\n**Targets:** {', '.join(targets)}\n**Size:** {size_gb}GB\n\n"
             output_text += f"```json\n{json.dumps(plan, indent=2, default=str)[:2000]}\n```\n\n"
             output_text += "**suggest_action:** Execute with `stage` tool."
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: HuggingFace Hub Handlers ────────────────────────────────
+
+    elif tool_name == "hf_list_models":
+        try:
+            api_key = arguments["api_key"]
+            params = {"limit": arguments.get("limit", 20)}
+            if arguments.get("author"):
+                params["author"] = arguments["author"]
+            if arguments.get("search"):
+                params["search"] = arguments["search"]
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://huggingface.co/api/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        models = await resp.json()
+                        output_text = f"🤗 **HuggingFace Models** ({len(models)} results)\n\n"
+                        for m in models[:int(params["limit"])]:
+                            downloads = m.get("downloads", 0)
+                            likes = m.get("likes", 0)
+                            pipeline = m.get("pipeline_tag", "N/A")
+                            output_text += f"- **{m['modelId']}** — ⬇️ {downloads:,} | ❤️ {likes} | 🏷️ {pipeline}\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ HF API {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "hf_list_datasets":
+        try:
+            api_key = arguments["api_key"]
+            params = {"limit": arguments.get("limit", 20)}
+            if arguments.get("author"):
+                params["author"] = arguments["author"]
+            if arguments.get("search"):
+                params["search"] = arguments["search"]
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://huggingface.co/api/datasets",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        datasets = await resp.json()
+                        output_text = f"🤗 **HuggingFace Datasets** ({len(datasets)} results)\n\n"
+                        for d in datasets[:int(params["limit"])]:
+                            downloads = d.get("downloads", 0)
+                            output_text += f"- **{d['id']}** — ⬇️ {downloads:,}\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ HF API {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "hf_model_info":
+        try:
+            api_key = arguments["api_key"]
+            model_id = arguments["model_id"]
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://huggingface.co/api/models/{model_id}",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        info = await resp.json()
+                        output_text = f"🤗 **Model: {model_id}**\n\n"
+                        output_text += f"**Pipeline:** {info.get('pipeline_tag', 'N/A')}\n"
+                        output_text += f"**Library:** {info.get('library_name', 'N/A')}\n"
+                        output_text += f"**Downloads:** {info.get('downloads', 0):,}\n"
+                        output_text += f"**Likes:** {info.get('likes', 0)}\n"
+                        output_text += f"**License:** {info.get('cardData', {}).get('license', 'N/A') if isinstance(info.get('cardData'), dict) else 'N/A'}\n"
+                        output_text += f"**Tags:** {', '.join(info.get('tags', [])[:15])}\n"
+                        siblings = info.get("siblings", [])
+                        total_size = sum(s.get("size", 0) for s in siblings if isinstance(s, dict))
+                        if total_size > 0:
+                            output_text += f"**Total Size:** {total_size / 1e9:.2f} GB\n"
+                        safetensors = info.get("safetensors", {})
+                        if safetensors and isinstance(safetensors, dict):
+                            params = safetensors.get("total", 0)
+                            if params:
+                                output_text += f"**Parameters:** {params / 1e9:.2f}B\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    elif resp.status == 404:
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ Model not found: {model_id}")], isError=True)
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ HF API {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "hf_create_endpoint":
+        try:
+            api_key = arguments["api_key"]
+            payload = {
+                "name": arguments["endpoint_name"],
+                "model": {"repository": arguments["model_id"]},
+                "compute": {
+                    "instanceType": arguments["instance_type"],
+                    "instanceSize": arguments.get("instance_size", "x1"),
+                    "scaling": {
+                        "minReplicas": arguments.get("min_replicas", 0),
+                        "maxReplicas": arguments.get("max_replicas", 1),
+                    }
+                },
+                "region": arguments.get("region", "us-east-1"),
+                "type": "protected",
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.endpoints.huggingface.cloud/v2/endpoint",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as resp:
+                    body = await resp.json(content_type=None)
+                    if resp.status in (200, 201, 202):
+                        output_text = f"✅ **HF Endpoint Created: {arguments['endpoint_name']}**\n\n"
+                        output_text += f"**Model:** {arguments['model_id']}\n"
+                        output_text += f"**Instance:** {arguments['instance_type']}\n"
+                        output_text += f"**Region:** {arguments.get('region', 'us-east-1')}\n"
+                        output_text += f"**Status:** {body.get('status', {}).get('state', 'pending')}\n"
+                        if body.get("status", {}).get("url"):
+                            output_text += f"**URL:** {body['status']['url']}\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ HF API {resp.status}: {json.dumps(body, default=str)[:800]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "hf_list_endpoints":
+        try:
+            api_key = arguments["api_key"]
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.endpoints.huggingface.cloud/v2/endpoint",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        endpoints = await resp.json(content_type=None)
+                        items = endpoints if isinstance(endpoints, list) else endpoints.get("items", [])
+                        output_text = f"🤗 **HF Inference Endpoints** ({len(items)})\n\n"
+                        for ep in items:
+                            name = ep.get("name", "?")
+                            state = ep.get("status", {}).get("state", "unknown")
+                            url = ep.get("status", {}).get("url", "N/A")
+                            model = ep.get("model", {}).get("repository", "?")
+                            icon = "✅" if state == "running" else "⏳" if state in ("pending", "initializing", "updating") else "🔴"
+                            output_text += f"- {icon} **{name}** — {model} | {state} | {url}\n"
+                        if not items:
+                            output_text += "No endpoints found.\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ HF API {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "hf_endpoint_info":
+        try:
+            api_key = arguments["api_key"]
+            ep_name = arguments["endpoint_name"]
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.endpoints.huggingface.cloud/v2/endpoint/{ep_name}",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        ep = await resp.json(content_type=None)
+                        output_text = f"🤗 **Endpoint: {ep_name}**\n\n"
+                        output_text += f"**Model:** {ep.get('model', {}).get('repository', '?')}\n"
+                        output_text += f"**State:** {ep.get('status', {}).get('state', 'unknown')}\n"
+                        output_text += f"**URL:** {ep.get('status', {}).get('url', 'N/A')}\n"
+                        compute = ep.get("compute", {})
+                        output_text += f"**Instance:** {compute.get('instanceType', '?')} ({compute.get('instanceSize', '?')})\n"
+                        scaling = compute.get("scaling", {})
+                        output_text += f"**Scaling:** {scaling.get('minReplicas', 0)} – {scaling.get('maxReplicas', 1)}\n"
+                        output_text += f"**Region:** {ep.get('region', '?')}\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ HF API {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "hf_delete_endpoint":
+        try:
+            api_key = arguments["api_key"]
+            ep_name = arguments["endpoint_name"]
+            async with aiohttp.ClientSession() as session:
+                async with session.delete(
+                    f"https://api.endpoints.huggingface.cloud/v2/endpoint/{ep_name}",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status in (200, 202, 204):
+                        return CallToolResult(content=[TextContent(type="text", text=f"✅ **Endpoint deleted: {ep_name}**")])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ HF API {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "hf_endpoint_infer":
+        try:
+            api_key = arguments["api_key"]
+            ep_name = arguments["endpoint_name"]
+            payload = {"inputs": arguments["inputs"]}
+            if arguments.get("parameters"):
+                payload["parameters"] = arguments["parameters"]
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"https://api.endpoints.huggingface.cloud/v2/endpoint/{ep_name}/inference",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as resp:
+                    body = await resp.json(content_type=None)
+                    if resp.status == 200:
+                        output_text = f"🤗 **Inference Result — {ep_name}**\n\n"
+                        output_text += f"```json\n{json.dumps(body, indent=2, default=str)[:3000]}\n```"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ HF Inference {resp.status}: {json.dumps(body, default=str)[:800]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: HF Smart Templates Handlers ──────────────────────────────
+
+    elif tool_name == "hf_smart_template":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.hf_smart_templates import HFSmartTemplates
+            templates = HFSmartTemplates()
+            model_id = arguments["model_id"]
+            template_type = arguments.get("template_type", "auto")
+            result = await templates.generate_template(model_id, template_type=template_type)
+            output_text = f"🧠 **Smart Template — {model_id}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found. Install: pip install terradev-cli")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "hf_hardware_recommend":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.hf_smart_templates import HFSmartTemplates
+            templates = HFSmartTemplates()
+            model_id = arguments["model_id"]
+            budget = arguments.get("budget_constraint")
+            result = await templates.recommend_hardware(model_id, budget_constraint=budget)
+            output_text = f"🖥️ **Hardware Recommendation — {model_id}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "hf_hardware_compare":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.hf_smart_templates import HFSmartTemplates
+            templates = HFSmartTemplates()
+            model_id = arguments["model_id"]
+            result = await templates.compare_hardware(model_id)
+            output_text = f"📊 **Hardware Comparison — {model_id}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: LangChain / LangGraph / LangSmith Handlers ───────────────
+
+    elif tool_name == "langchain_create_workflow":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.langchain_service import LangChainService
+            svc = LangChainService(api_key=arguments["api_key"])
+            config = arguments["workflow_config"]
+            langsmith_key = arguments.get("langsmith_api_key")
+            result = await svc.create_workflow(config, langsmith_api_key=langsmith_key)
+            output_text = f"🔗 **LangChain Workflow Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langchain_create_sglang_pipeline":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.langchain_service import LangChainService
+            svc = LangChainService(api_key=arguments["api_key"])
+            config = arguments["pipeline_config"]
+            result = await svc.create_sglang_pipeline(config)
+            output_text = f"🔗 **SGLang Pipeline Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langsmith_create_project":
+        try:
+            api_key = arguments["api_key"]
+            payload = {"name": arguments["name"]}
+            if arguments.get("description"):
+                payload["description"] = arguments["description"]
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.smith.langchain.com/api/v1/sessions",
+                    headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    body = await resp.json(content_type=None)
+                    if resp.status in (200, 201):
+                        output_text = f"✅ **LangSmith Project Created: {arguments['name']}**\n\n"
+                        output_text += f"**ID:** {body.get('id', 'N/A')}\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ LangSmith {resp.status}: {json.dumps(body, default=str)[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langsmith_get_workspaces":
+        try:
+            api_key = arguments["api_key"]
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.smith.langchain.com/api/v1/workspaces",
+                    headers={"x-api-key": api_key},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        workspaces = await resp.json(content_type=None)
+                        items = workspaces if isinstance(workspaces, list) else workspaces.get("workspaces", [workspaces])
+                        output_text = f"🔗 **LangSmith Workspaces** ({len(items)})\n\n"
+                        for w in items:
+                            name = w.get("display_name", w.get("name", w.get("id", "?")))
+                            output_text += f"- **{name}** (ID: {w.get('id', '?')})\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ LangSmith {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langsmith_create_trace":
+        try:
+            api_key = arguments["api_key"]
+            run_id = arguments["run_id"]
+            trace_data = arguments["trace_data"]
+            trace_data["id"] = run_id
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.smith.langchain.com/api/v1/runs",
+                    headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                    json=trace_data,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status in (200, 201, 202):
+                        output_text = f"✅ **Trace Created: {run_id}**\n"
+                        return CallToolResult(content=[TextContent(type="text", text=output_text)])
+                    else:
+                        body = await resp.text()
+                        return CallToolResult(content=[TextContent(type="text", text=f"❌ LangSmith {resp.status}: {body[:500]}")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langgraph_create_workflow":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.langgraph_service import LangGraphService
+            svc = LangGraphService(api_key=arguments["api_key"])
+            config = arguments["graph_config"]
+            langsmith_key = arguments.get("langsmith_api_key")
+            result = await svc.create_workflow(config, langsmith_api_key=langsmith_key)
+            output_text = f"🕸️ **LangGraph Workflow Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langgraph_orchestrator_worker":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.langgraph_service import LangGraphService
+            svc = LangGraphService(api_key=arguments["api_key"])
+            config = arguments["workflow_config"]
+            result = await svc.create_orchestrator_worker(config)
+            output_text = f"🕸️ **Orchestrator-Worker Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langgraph_evaluation_workflow":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.langgraph_service import LangGraphService
+            svc = LangGraphService(api_key=arguments["api_key"])
+            config = arguments["evaluation_config"]
+            result = await svc.create_evaluation_workflow(config)
+            output_text = f"🕸️ **Evaluation Workflow Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "langgraph_workflow_status":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.langgraph_service import LangGraphService
+            svc = LangGraphService(api_key=arguments["api_key"])
+            wf_id = arguments["workflow_id"]
+            result = await svc.get_workflow_status(wf_id)
+            output_text = f"🕸️ **Workflow Status — {wf_id}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: W&B Enhanced Handlers ─────────────────────────────────────
+
+    elif tool_name == "wandb_create_dashboard":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.wandb_enhanced import WandBEnhanced
+            svc = WandBEnhanced(api_key=arguments["api_key"], entity=arguments.get("entity"))
+            config = arguments["dashboard_config"]
+            result = await svc.create_dashboard(config)
+            output_text = f"📊 **W&B Dashboard Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "wandb_create_terradev_dashboard":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.wandb_enhanced import WandBEnhanced
+            svc = WandBEnhanced(api_key=arguments["api_key"], entity=arguments.get("entity"))
+            project = arguments.get("project", "terradev")
+            # Parallel: create dashboard + alerts simultaneously
+            dashboard_coro = svc.create_terradev_dashboard(project)
+            alerts_coro = svc.create_terradev_alerts()
+            dashboard_result, alerts_result = await asyncio.gather(dashboard_coro, alerts_coro, return_exceptions=True)
+            output_text = f"📊 **Terradev Dashboard — {project}**\n\n"
+            if not isinstance(dashboard_result, Exception):
+                output_text += f"**Dashboard:** ✅ Created\n```json\n{json.dumps(dashboard_result, indent=2, default=str)[:2000]}\n```\n\n"
+            else:
+                output_text += f"**Dashboard:** ❌ {dashboard_result}\n\n"
+            if not isinstance(alerts_result, Exception):
+                output_text += f"**Alerts:** ✅ Configured\n```json\n{json.dumps(alerts_result, indent=2, default=str)[:1000]}\n```"
+            else:
+                output_text += f"**Alerts:** ❌ {alerts_result}"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "wandb_create_report":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.wandb_enhanced import WandBEnhanced
+            svc = WandBEnhanced(api_key=arguments["api_key"], entity=arguments.get("entity"))
+            config = arguments["report_config"]
+            result = await svc.create_report(config)
+            output_text = f"📝 **W&B Report Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "wandb_create_terradev_report":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.wandb_enhanced import WandBEnhanced
+            svc = WandBEnhanced(api_key=arguments["api_key"], entity=arguments.get("entity"))
+            metrics = arguments.get("metrics_data", {})
+            result = await svc.create_terradev_report(metrics)
+            output_text = f"📝 **Terradev Report Generated**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "wandb_setup_alerts":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.wandb_enhanced import WandBEnhanced
+            svc = WandBEnhanced(api_key=arguments["api_key"], entity=arguments.get("entity"))
+            config = arguments["alert_config"]
+            result = await svc.setup_alerts(config)
+            output_text = f"🔔 **W&B Alerts Configured**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:2000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "wandb_create_terradev_alerts":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.wandb_enhanced import WandBEnhanced
+            svc = WandBEnhanced(api_key=arguments["api_key"], entity=arguments.get("entity"))
+            result = await svc.create_terradev_alerts()
+            output_text = f"🔔 **Terradev Alerts Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:2000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "wandb_dashboard_status":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.wandb_enhanced import WandBEnhanced
+            svc = WandBEnhanced(api_key=arguments["api_key"], entity=arguments.get("entity"))
+            result = await svc.dashboard_status()
+            output_text = f"📊 **W&B Monitoring Overview**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: Data Governance Handlers ──────────────────────────────────
+
+    elif tool_name == "governance_request_consent":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.data_governance import DataGovernance
+            gov = DataGovernance()
+            result = await gov.request_consent(
+                user_id=arguments["user_id"],
+                consent_type=arguments["consent_type"],
+                dataset_name=arguments["dataset_name"],
+                purpose=arguments["purpose"],
+                source_location=arguments.get("source_location"),
+                target_location=arguments.get("target_location"),
+            )
+            output_text = f"📋 **Consent Request Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:2000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "governance_record_consent":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.data_governance import DataGovernance
+            gov = DataGovernance()
+            result = await gov.record_consent(
+                request_id=arguments["request_id"],
+                user_id=arguments["user_id"],
+                granted=arguments["granted"],
+                conditions=arguments.get("conditions"),
+            )
+            icon = "✅" if arguments["granted"] else "❌"
+            output_text = f"{icon} **Consent {'Granted' if arguments['granted'] else 'Denied'}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:2000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "governance_evaluate_opa":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.data_governance import DataGovernance
+            gov = DataGovernance()
+            result = await gov.evaluate_opa(
+                user_id=arguments["user_id"],
+                dataset_name=arguments["dataset_name"],
+                action=arguments["action"],
+                target_location=arguments.get("target_location"),
+            )
+            allowed = result.get("allowed", result.get("result", {}).get("allow", False))
+            icon = "✅" if allowed else "🚫"
+            output_text = f"{icon} **OPA Policy Evaluation**\n\n"
+            output_text += f"**Action:** {arguments['action']} on {arguments['dataset_name']}\n"
+            output_text += f"**Decision:** {'ALLOWED' if allowed else 'DENIED'}\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:2000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "governance_move_data":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.data_governance import DataGovernance
+            gov = DataGovernance()
+            result = await gov.move_data(
+                user_id=arguments["user_id"],
+                consent_request_id=arguments["consent_request_id"],
+                dataset_name=arguments["dataset_name"],
+                source_location=arguments["source_location"],
+                target_location=arguments["target_location"],
+            )
+            output_text = f"📦 **Data Move — {arguments['dataset_name']}**\n\n"
+            output_text += f"**From:** {arguments['source_location']}\n"
+            output_text += f"**To:** {arguments['target_location']}\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:2000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "governance_movement_history":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.data_governance import DataGovernance
+            gov = DataGovernance()
+            result = await gov.movement_history(
+                user_id=arguments.get("user_id"),
+                dataset_name=arguments.get("dataset_name"),
+                limit=arguments.get("limit", 50),
+            )
+            output_text = f"📜 **Data Movement History**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "governance_compliance_report":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.data_governance import DataGovernance
+            gov = DataGovernance()
+            # Parallel: gather consent stats + movement history + policy evaluations
+            report = await gov.compliance_report(
+                start_date=arguments["start_date"],
+                end_date=arguments["end_date"],
+            )
+            output_text = f"📋 **Compliance Report**\n\n"
+            output_text += f"**Period:** {arguments['start_date']} → {arguments['end_date']}\n\n"
+            output_text += f"```json\n{json.dumps(report, indent=2, default=str)[:5000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: Cost Optimizer Deep Handlers ──────────────────────────────
+
+    elif tool_name == "cost_analyze":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.cost_optimizer import CostOptimizer
+            optimizer = CostOptimizer()
+            days = arguments.get("days", 30)
+            result = await optimizer.analyze(days=days)
+            output_text = f"💰 **Cost Analysis — Last {days} Days**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "cost_optimize_recommend":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.cost_optimizer import CostOptimizer
+            optimizer = CostOptimizer()
+            result = await optimizer.recommend(
+                target_savings=arguments.get("target_savings"),
+                constraints=arguments.get("constraints"),
+            )
+            output_text = f"💡 **Cost Optimization Recommendations**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "cost_simulate":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.cost_optimizer import CostOptimizer
+            optimizer = CostOptimizer()
+            result = await optimizer.simulate(
+                scenario=arguments["scenario"],
+                compare_with=arguments.get("compare_with"),
+            )
+            output_text = f"🔮 **Cost Simulation**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "cost_budget_optimize":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.cost_optimizer import CostOptimizer
+            optimizer = CostOptimizer()
+            result = await optimizer.budget_optimize(
+                budget=arguments["budget"],
+                gpu_type=arguments.get("gpu_type"),
+                gpu_count=arguments.get("gpu_count", 1),
+                hours=arguments.get("hours", 1.0),
+                allow_spot=arguments.get("allow_spot", True),
+            )
+            output_text = f"💰 **Budget Optimization — ${arguments['budget']}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: Price Intelligence Extended Handlers ──────────────────────
+
+    elif tool_name == "price_trends":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.price_intelligence import PriceIntelligence
+            intel = PriceIntelligence()
+            gpu_type = arguments["gpu_type"]
+            hours = arguments.get("hours", 24)
+            result = await intel.get_trends(gpu_type=gpu_type, hours=hours)
+            output_text = f"📈 **Price Trends — {gpu_type} (last {hours}h)**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "price_budget_optimize":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.price_intelligence import PriceIntelligence
+            intel = PriceIntelligence()
+            result = await intel.budget_optimize(
+                budget=arguments["budget"],
+                gpu_type=arguments["gpu_type"],
+                gpu_count=arguments.get("gpu_count", 1),
+                hours=arguments.get("hours", 1.0),
+            )
+            output_text = f"💰 **Price Budget Optimization**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "price_spot_risk":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.price_intelligence import PriceIntelligence
+            intel = PriceIntelligence()
+            result = await intel.spot_risk(
+                gpu_type=arguments["gpu_type"],
+                provider=arguments.get("provider", "all"),
+            )
+            output_text = f"⚠️ **Spot Risk Assessment — {arguments['gpu_type']}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: Training Extended Handlers ────────────────────────────────
+
+    elif tool_name == "training_config_generate":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.training_orchestrator import TrainingOrchestrator
+            orch = TrainingOrchestrator()
+            result = await orch.generate_config(
+                name=arguments["name"],
+                script=arguments["script"],
+                framework=arguments.get("framework", "torchrun"),
+                nodes=arguments.get("nodes"),
+                gpus_per_node=arguments.get("gpus_per_node", 8),
+                from_provision=arguments.get("from_provision"),
+                deepspeed_config=arguments.get("deepspeed_config"),
+                script_args=arguments.get("script_args"),
+            )
+            output_text = f"⚙️ **Training Config — {arguments['name']}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "training_launch_distributed":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.training_orchestrator import TrainingOrchestrator
+            orch = TrainingOrchestrator()
+            skip_preflight = arguments.get("skip_preflight", False)
+            # Parallel: preflight + config generation (if not skipping)
+            if not skip_preflight and (arguments.get("nodes") or arguments.get("from_provision")):
+                from terradev_cli.core.preflight_validator import PreflightValidator
+                validator = PreflightValidator()
+                config_coro = orch.generate_config(
+                    name=arguments["name"], script=arguments["script"],
+                    framework=arguments.get("framework", "torchrun"),
+                    nodes=arguments.get("nodes"), gpus_per_node=arguments.get("gpus_per_node", 8),
+                    from_provision=arguments.get("from_provision"),
+                )
+                preflight_coro = validator.validate(
+                    nodes=arguments.get("nodes"), from_provision=arguments.get("from_provision"),
+                )
+                config_result, preflight_result = await asyncio.gather(config_coro, preflight_coro, return_exceptions=True)
+                output_text = f"🚀 **Distributed Training Launch — {arguments['name']}**\n\n"
+                if isinstance(preflight_result, Exception):
+                    output_text += f"**Preflight:** ⚠️ {preflight_result}\n"
+                else:
+                    passed = preflight_result.get("passed", True) if isinstance(preflight_result, dict) else True
+                    output_text += f"**Preflight:** {'✅ Passed' if passed else '⚠️ Warnings'}\n"
+                if isinstance(config_result, Exception):
+                    output_text += f"**Config:** ❌ {config_result}\n"
+                else:
+                    output_text += f"**Config:** ✅ Generated\n"
+                    output_text += f"```json\n{json.dumps(config_result, indent=2, default=str)[:3000]}\n```"
+            else:
+                result = await orch.launch_distributed(
+                    name=arguments["name"], script=arguments["script"],
+                    framework=arguments.get("framework", "torchrun"),
+                    nodes=arguments.get("nodes"), gpus_per_node=arguments.get("gpus_per_node", 8),
+                    from_provision=arguments.get("from_provision"),
+                )
+                output_text = f"🚀 **Distributed Training Launched — {arguments['name']}**\n\n"
+                output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "train_snapshot":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.training_monitor import TrainingMonitor
+            monitor = TrainingMonitor()
+            job_id = arguments["job_id"]
+            cost_rate = arguments.get("cost_rate", 2.0)
+            result = await monitor.snapshot(job_id=job_id, cost_rate=cost_rate)
+            output_text = f"📊 **Training Snapshot — {job_id}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:5000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "train_detect_stragglers":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.training_monitor import TrainingMonitor
+            monitor = TrainingMonitor()
+            job_id = arguments["job_id"]
+            threshold = arguments.get("threshold", 0.7)
+            result = await monitor.detect_stragglers(job_id=job_id, threshold=threshold)
+            stragglers = result.get("stragglers", []) if isinstance(result, dict) else []
+            output_text = f"🐢 **Straggler Detection — {job_id}**\n\n"
+            if stragglers:
+                output_text += f"⚠️ **{len(stragglers)} straggler(s) detected!**\n\n"
+            else:
+                output_text += "✅ **No stragglers detected.**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: Preflight Extended Handlers ───────────────────────────────
+
+    elif tool_name == "preflight_report":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.preflight_validator import PreflightValidator
+            validator = PreflightValidator()
+            result = await validator.full_report(
+                nodes=arguments.get("nodes"),
+                from_provision=arguments.get("from_provision"),
+                checks=arguments.get("checks"),
+            )
+            output_text = f"🔍 **Preflight Report**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:5000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "preflight_gpu_check":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.preflight_validator import PreflightValidator
+            validator = PreflightValidator()
+            result = await validator.gpu_check(
+                nodes=arguments.get("nodes"),
+                from_provision=arguments.get("from_provision"),
+            )
+            output_text = f"🖥️ **GPU Preflight Check**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "preflight_network_check":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.core.preflight_validator import PreflightValidator
+            validator = PreflightValidator()
+            result = await validator.network_check(
+                nodes=arguments.get("nodes"),
+                from_provision=arguments.get("from_provision"),
+            )
+            output_text = f"🌐 **Network Preflight Check**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.0.0: Kubernetes Enhanced Handlers ──────────────────────────────
+
+    elif tool_name == "k8s_gpu_operator_install":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.kubernetes_enhanced import EnhancedKubernetesService
+            svc = EnhancedKubernetesService()
+            cluster = arguments["cluster_name"]
+            ns = arguments.get("namespace", "gpu-operator")
+            driver_ver = arguments.get("driver_version")
+            result = await svc.install_gpu_operator(cluster_name=cluster, namespace=ns, driver_version=driver_ver)
+            output_text = f"🖥️ **GPU Operator Installed — {cluster}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "k8s_device_plugin":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.kubernetes_enhanced import EnhancedKubernetesService
+            svc = EnhancedKubernetesService()
+            result = await svc.configure_device_plugin(
+                cluster_name=arguments["cluster_name"],
+                strategy=arguments.get("strategy", "none"),
+                replicas=arguments.get("replicas", 2),
+            )
+            output_text = f"🔌 **Device Plugin Configured — {arguments['cluster_name']}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "k8s_mig_configure":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.kubernetes_enhanced import EnhancedKubernetesService
+            svc = EnhancedKubernetesService()
+            result = await svc.configure_mig(
+                cluster_name=arguments["cluster_name"],
+                mig_profile=arguments["mig_profile"],
+                gpu_indices=arguments.get("gpu_indices"),
+            )
+            output_text = f"🔧 **MIG Configured — {arguments['cluster_name']}**\n\n"
+            output_text += f"**Profile:** {arguments['mig_profile']}\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "k8s_time_slicing":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.kubernetes_enhanced import EnhancedKubernetesService
+            svc = EnhancedKubernetesService()
+            result = await svc.configure_time_slicing(
+                cluster_name=arguments["cluster_name"],
+                replicas=arguments.get("replicas", 4),
+                oversubscribe=arguments.get("oversubscribe", True),
+            )
+            output_text = f"⏱️ **Time-Slicing Configured — {arguments['cluster_name']}**\n\n"
+            output_text += f"**Replicas/GPU:** {arguments.get('replicas', 4)}\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except ImportError:
+            return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "k8s_monitoring_stack":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.ml_services.kubernetes_enhanced import EnhancedKubernetesService
+            svc = EnhancedKubernetesService()
+            result = await svc.install_monitoring_stack(
+                cluster_name=arguments["cluster_name"],
+                namespace=arguments.get("namespace", "monitoring"),
+                grafana_password=arguments.get("grafana_password"),
+                enable_alerting=arguments.get("enable_alerting", True),
+            )
+            output_text = f"📊 **Monitoring Stack Deployed — {arguments['cluster_name']}**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
             return CallToolResult(content=[TextContent(type="text", text=output_text)])
         except ImportError:
             return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)

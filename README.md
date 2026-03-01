@@ -1,4 +1,4 @@
-# Terradev MCP Server v2.0.1
+# Terradev MCP Server v2.0.3
 
 GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NIXL KV transfer, and Terraform-powered parallel GPU provisioning** across 19 cloud providers.
 
@@ -6,11 +6,12 @@ GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NI
   <img src="https://raw.githubusercontent.com/theoddden/terradev-mcp/main/demo/terradev-mcp-demo.gif" alt="Terradev MCP Demo" width="800">
 </p>
 
-## What's New in v2.0.1
+## What's New in v2.0.3
 
+- **LMCache Auto-Enabled**: Distributed KV cache sharing via Redis — 3-10x TTFT reduction on every vLLM deployment, zero config
 - **19 Cloud Providers**: Added Alibaba Cloud, OVHcloud, FluidStack, Hetzner, SiliconFlow (total: 19 providers)
 - **69 MCP Tools**: Full training lifecycle, inference deployment, GitOps, orchestrator, warm pools, cost scaler, workflows
-- **vLLM Cost Optimizations**: KV Cache Offloading (9x throughput), MTP Speculative Decoding (2.8x speed), Sleep Mode (18-200x faster wake), Multi-LoRA MoE serving
+- **vLLM Cost Optimizations**: LMCache (3-10x TTFT), KV Cache Offloading (9x throughput), MTP Speculative Decoding (2.8x speed), Sleep Mode (18-200x faster wake), Multi-LoRA MoE serving
 - **Agent-Oriented**: suggest_action fields, recommend fields, requires_confirmation gates, estimated_cost in responses
 - **MCP Resources**: active_context, instances, jobs, spend, alerts
 - **Workflow Pipelines**: YAML declarative pipelines with templates
@@ -36,7 +37,7 @@ GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NI
 
 ### Prerequisites
 
-1. Install Terradev CLI (v3.5.0+):
+1. Install Terradev CLI (v3.5.1+):
 ```bash
 pip install terradev-cli
 # For all providers + HF Spaces:

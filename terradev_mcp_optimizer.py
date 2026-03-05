@@ -194,20 +194,61 @@ NAMESPACE_GROUPS: Dict[str, Dict[str, Any]] = {
         "description": "KServe: generate YAML, list, status of InferenceServices.",
         "actions": ["generate_yaml", "list", "status"],
     },
+    "phoenix": {
+        "description": "Arize Phoenix: LLM trace observability — projects, spans, traces, OTEL, K8s.",
+        "actions": ["test", "projects", "spans", "trace", "otel_env", "snippet", "k8s"],
+    },
+    "guardrails": {
+        "description": "NeMo Guardrails: LLM output safety — chat, config generation, K8s.",
+        "actions": ["test", "chat", "generate_config", "k8s"],
+    },
+    "qdrant": {
+        "description": "Qdrant: vector DB for RAG — collections, create, info, count, K8s.",
+        "actions": ["test", "collections", "create_collection", "info", "count", "k8s"],
+    },
 }
 
-# Tools that stay as top-level (not grouped into namespaces)
+# ── Advanced Meta-Tool Categories ─────────────────────────────────────────────
+# Maps category → (description, list of original tool names)
+# These tools are consolidated into a single `terradev_advanced` meta-tool.
+
+ADVANCED_TOOL_CATEGORIES: Dict[str, Dict[str, Any]] = {
+    "inference": {
+        "description": "Routing, failover, disaggregated P/D, deployment.",
+        "tools": ["infer_route", "infer_route_disagg", "infer_status", "infer_failover", "infer_deploy"],
+    },
+    "topology": {
+        "description": "GPU NUMA topology, MoE cluster deployment.",
+        "tools": ["gpu_topology", "moe_deploy"],
+    },
+    "deploy": {
+        "description": "Provisioning, rollback, manifests, smart deploy, Helm generation.",
+        "tools": ["up", "rollback", "manifests", "smart_deploy", "helm_generate"],
+    },
+    "scaling": {
+        "description": "Warm pool and budget-aware cost scaler management.",
+        "tools": ["warm_pool_start", "warm_pool_status", "cost_scaler_start", "cost_scaler_status"],
+    },
+    "data": {
+        "description": "Dataset staging, workflow execution.",
+        "tools": ["stage", "run_workflow"],
+    },
+    "discovery": {
+        "description": "Local GPU scan, analytics, optimization, provider setup.",
+        "tools": ["local_scan", "analytics", "optimize", "setup_provider", "configure_provider"],
+    },
+}
+
+# Build reverse map: original_tool_name -> (category, tool_name)
+_ADVANCED_TOOL_MAP: Dict[str, Tuple[str, str]] = {}
+for _cat, _group in ADVANCED_TOOL_CATEGORIES.items():
+    for _tool in _group["tools"]:
+        _ADVANCED_TOOL_MAP[_tool] = (_cat, _tool)
+
+# Tools that stay as true top-level (never grouped)
 UNGROUPED_TOOLS: Set[str] = {
-    "quote_gpu", "provision_gpu", "local_scan", "status",
-    "manage_instance", "analytics", "optimize",
-    "setup_provider", "configure_provider",
-    "infer_route", "infer_route_disagg", "infer_status", "infer_failover",
-    "gpu_topology", "moe_deploy",
-    "up", "rollback", "manifests", "smart_deploy", "helm_generate",
-    "warm_pool_start", "warm_pool_status",
-    "cost_scaler_start", "cost_scaler_status",
-    "run_workflow", "active_context",
-    "stage", "infer_deploy",
+    "quote_gpu", "provision_gpu", "status",
+    "manage_instance", "active_context",
 }
 
 # Mutating tools that must NOT be parallelized or cached
@@ -238,6 +279,9 @@ MUTATING_TOOLS: Set[str] = {
     "k8s_gpu_operator_install", "k8s_device_plugin",
     "k8s_mig_configure", "k8s_time_slicing", "k8s_monitoring_stack",
     "mlflow_log_run", "mlflow_register_model",
+    "guardrails_chat", "guardrails_generate_config",
+    "qdrant_create_collection",
+    "phoenix_k8s", "guardrails_k8s", "qdrant_k8s",
 }
 
 
@@ -338,12 +382,13 @@ class ToolCompressor:
         compressed = []
         seen_ns = set()
         ungrouped_seen = set()
+        advanced_emitted = False
 
         for tool in tools:
             name = tool.name
 
             # Check if this tool belongs to a namespace group
-            if name in _FLAT_TO_NS and name not in UNGROUPED_TOOLS:
+            if name in _FLAT_TO_NS and name not in UNGROUPED_TOOLS and name not in _ADVANCED_TOOL_MAP:
                 ns = _FLAT_TO_NS[name].split(".")[0]
                 if ns in seen_ns:
                     continue  # Already emitted this namespace tool
@@ -353,6 +398,13 @@ class ToolCompressor:
                 ns_tool = self._build_namespace_tool(ns, Tool)
                 if ns_tool:
                     compressed.append(ns_tool)
+            elif name in _ADVANCED_TOOL_MAP:
+                # Absorb into the terradev_advanced meta-tool
+                if not advanced_emitted:
+                    advanced_emitted = True
+                    meta_tool = self._build_advanced_meta_tool(Tool)
+                    if meta_tool:
+                        compressed.append(meta_tool)
             elif name in UNGROUPED_TOOLS or name not in _FLAT_TO_NS:
                 if name not in ungrouped_seen:
                     ungrouped_seen.add(name)
@@ -363,7 +415,8 @@ class ToolCompressor:
 
         logger.info(
             f"ToolCompressor: {len(tools)} tools → {len(compressed)} "
-            f"({len(seen_ns)} namespaces + {len(ungrouped_seen)} ungrouped)"
+            f"({len(seen_ns)} namespaces + {len(ungrouped_seen)} ungrouped"
+            f"{' + 1 meta-tool' if advanced_emitted else ''})"
         )
         return compressed
 
@@ -375,10 +428,34 @@ class ToolCompressor:
             arguments: Arguments dict, may contain "action" key for namespace tools
 
         Returns:
-            (original_tool_name, original_arguments) with "action" key removed
+            (original_tool_name, original_arguments) with "action"/"category" keys removed
         """
         if not self.enabled:
             return tool_name, arguments
+
+        # Check if it's the advanced meta-tool
+        if tool_name == "terradev_advanced":
+            category = arguments.get("category")
+            tool = arguments.get("tool")
+            if not category or not tool:
+                raise ValueError(
+                    "terradev_advanced requires 'category' and 'tool' parameters. "
+                    f"Categories: {list(ADVANCED_TOOL_CATEGORIES.keys())}"
+                )
+            cat_group = ADVANCED_TOOL_CATEGORIES.get(category)
+            if not cat_group:
+                raise ValueError(
+                    f"Unknown category '{category}'. "
+                    f"Valid: {list(ADVANCED_TOOL_CATEGORIES.keys())}"
+                )
+            if tool not in cat_group["tools"]:
+                raise ValueError(
+                    f"Unknown tool '{tool}' in category '{category}'. "
+                    f"Valid: {cat_group['tools']}"
+                )
+            # Remove routing keys, pass remaining args to original handler
+            expanded_args = {k: v for k, v in arguments.items() if k not in ("category", "tool")}
+            return tool, expanded_args
 
         # Check if it's a namespace tool
         if tool_name in NAMESPACE_GROUPS:
@@ -397,6 +474,72 @@ class ToolCompressor:
 
         # Not a namespace tool — pass through unchanged
         return tool_name, arguments
+
+    def _build_advanced_meta_tool(self, ToolClass: type) -> Any:
+        """Build the terradev_advanced meta-tool from ADVANCED_TOOL_CATEGORIES.
+
+        Emits a single tool with category + tool enum routing, and a merged
+        superset of all child tool properties.
+        """
+        # Build category descriptions for the enum
+        category_enum = list(ADVANCED_TOOL_CATEGORIES.keys())
+        category_desc_parts = [f"{c}: {g['description']}" for c, g in ADVANCED_TOOL_CATEGORIES.items()]
+
+        # Build tool enum per category
+        all_tool_names: List[str] = []
+        for cat_group in ADVANCED_TOOL_CATEGORIES.values():
+            all_tool_names.extend(cat_group["tools"])
+
+        # Merge all child tool properties into a union schema
+        all_properties: Dict[str, Any] = {
+            "category": {
+                "type": "string",
+                "description": "Category: " + "; ".join(category_desc_parts),
+                "enum": category_enum,
+            },
+            "tool": {
+                "type": "string",
+                "description": "Tool name within category.",
+                "enum": sorted(set(all_tool_names)),
+            },
+        }
+
+        for tool_name in all_tool_names:
+            if tool_name not in self._original_tools:
+                continue
+            orig_schema = self._original_tools[tool_name].inputSchema
+            if not isinstance(orig_schema, dict):
+                continue
+            for prop_name, prop_def in orig_schema.get("properties", {}).items():
+                if prop_name not in all_properties:
+                    all_properties[prop_name] = prop_def
+
+        # Build the description from child tool descriptions
+        child_descs = []
+        for cat, cat_group in ADVANCED_TOOL_CATEGORIES.items():
+            tools_in_cat = cat_group["tools"]
+            tool_summaries = []
+            for tn in tools_in_cat:
+                orig = self._original_tools.get(tn)
+                if orig:
+                    tool_summaries.append(f"{tn}: {orig.description}")
+            child_descs.append(f"[{cat}] {', '.join(t for t in tools_in_cat)}")
+
+        description = (
+            "Advanced Terradev operations. Categories: "
+            + "; ".join(child_descs)
+            + "."
+        )
+
+        return ToolClass(
+            name="terradev_advanced",
+            description=description,
+            inputSchema={
+                "type": "object",
+                "properties": all_properties,
+                "required": ["category", "tool"],
+            },
+        )
 
     def _build_namespace_tool(self, ns: str, ToolClass: type) -> Optional[Any]:
         """Build a single namespace Tool from all tools in the group."""

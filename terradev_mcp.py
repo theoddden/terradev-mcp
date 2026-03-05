@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Terradev MCP Server v5.2.0 - Complete Agentic GPU Infrastructure for Claude Code
+Terradev MCP Server v2.0.3 - Complete Agentic GPU Infrastructure for Claude Code
 
 192 MCP tools: GPU provisioning, Kubernetes clusters, vLLM/SGLang/Ollama inference,
 Arize Phoenix trace observability, NeMo Guardrails output safety, Qdrant vector DB,

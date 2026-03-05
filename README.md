@@ -1,6 +1,6 @@
 # Terradev MCP Server v2.0.3
 
-GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NIXL KV transfer, and Terraform-powered parallel GPU provisioning** across 19 cloud providers.
+Complete Agentic GPU Infrastructure for Claude Code — **192 MCP tools**: GPU provisioning, vLLM/SGLang/Ollama inference, Arize Phoenix observability, NeMo Guardrails safety, Qdrant vector DB, Ray cluster management, Datadog monitoring, and Terraform-powered parallel provisioning across 20 cloud providers.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/theoddden/terradev-mcp/main/demo/terradev-mcp-demo.gif" alt="Terradev MCP Demo" width="800">
@@ -8,18 +8,20 @@ GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NI
 
 ## What's New in v2.0.3
 
-- **LMCache Auto-Enabled**: Distributed KV cache sharing via Redis — 3-10x TTFT reduction on every vLLM deployment, zero config
-- **19 Cloud Providers**: Added Alibaba Cloud, OVHcloud, FluidStack, Hetzner, SiliconFlow (total: 19 providers)
-- **69 MCP Tools**: Full training lifecycle, inference deployment, GitOps, orchestrator, warm pools, cost scaler, workflows
-- **vLLM Cost Optimizations**: LMCache (3-10x TTFT), KV Cache Offloading (9x throughput), MTP Speculative Decoding (2.8x speed), Sleep Mode (18-200x faster wake), Multi-LoRA MoE serving
-- **Agent-Oriented**: suggest_action fields, recommend fields, requires_confirmation gates, estimated_cost in responses
-- **MCP Resources**: active_context, instances, jobs, spend, alerts
-- **Workflow Pipelines**: YAML declarative pipelines with templates
+- **192 MCP Tools**: Massively expanded from 69 → 192 tools
+- **Arize Phoenix**: LLM trace observability — projects, spans, traces, OTEL env, K8s deployment (7 tools)
+- **NeMo Guardrails**: Output safety — test, chat, config generation, K8s deployment (4 tools)
+- **Qdrant Vector DB**: RAG infrastructure — collections, create, info, count, K8s deployment (6 tools)
+- **Datadog Monitoring**: Metrics, monitors, dashboards, Terraform export (10 tools)
+- **HuggingFace Hub**: Models, datasets, endpoints, smart templates, hardware recommendations (11 tools)
+- **LangChain/LangGraph**: Workflow creation, orchestrator-worker, evaluation (9 tools)
+- **20 Cloud Providers**: Alibaba Cloud, OVHcloud, FluidStack, Hetzner, SiliconFlow + 15 more
+- **vLLM Cost Optimizations**: LMCache, KV Cache Offloading, MTP Speculative Decoding, Sleep Mode, Multi-LoRA
+- **Data Governance**: Consent management, OPA policy evaluation, compliance reports (6 tools)
+- **Cost Intelligence**: Deep analysis, simulation, budget optimization (4 tools)
 
 ### Previous Releases
-- **Local GPU Discovery**: Scan local machines for available GPUs (Mac Mini M4 + RTX 4090 = 48GB pool!)
-- **Hybrid Local/Cloud Orchestration**: Local-first provisioning with automatic cloud overflow
-- **Claude.ai Connector**: Fully working OAuth 2.0 PKCE flow for remote access
+- **Claude.ai Connector**: OAuth 2.0 PKCE flow for remote access
 - **MoE Cluster Templates**: Production-ready infrastructure for Mixture-of-Experts models
 - **NVLink Topology Enforcement**: Automatic single-node TP with NUMA-aligned GPU placement
 - **Terraform Core Engine**: All GPU provisioning uses Terraform for optimal parallel efficiency
@@ -37,7 +39,7 @@ GPU Cloud Provisioning for Claude Code - **Ray Serve LLM, Expert Parallelism, NI
 
 ### Prerequisites
 
-1. Install Terradev CLI (v3.5.1+):
+1. Install Terradev CLI (v3.7.0+):
 ```bash
 pip install terradev-cli
 # For all providers + HF Spaces:
@@ -107,7 +109,7 @@ See `nginx-mcp.conf` for reverse proxy configuration with SSL.
 
 ## Available MCP Tools
 
-The Terradev MCP server provides 20+ tools for complete GPU cloud management:
+The Terradev MCP server provides 192 tools for complete GPU cloud management:
 
 ### GPU Operations
 - **`local_scan`** - Discover local GPU devices and total VRAM pool (NEW in v1.2.2)
@@ -148,6 +150,29 @@ The Terradev MCP server provides 20+ tools for complete GPU cloud management:
 ### Provider Configuration
 - **`setup_provider`** - Get setup instructions for any cloud provider
 - **`configure_provider`** - Configure provider credentials locally
+
+### Arize Phoenix — LLM Trace Observability
+- **`phoenix_test`** - Test connection to Phoenix server
+- **`phoenix_projects`** - List Phoenix projects
+- **`phoenix_spans`** - List spans with SpanQuery DSL filters
+- **`phoenix_trace`** - View full execution tree for a trace
+- **`phoenix_otel_env`** - Generate OTEL env vars for serving pods
+- **`phoenix_snippet`** - Generate Python instrumentation snippet
+- **`phoenix_k8s`** - Generate K8s deployment manifest
+
+### NeMo Guardrails — Output Safety
+- **`guardrails_test`** - Test connection to Guardrails server
+- **`guardrails_chat`** - Send message through safety rails
+- **`guardrails_generate_config`** - Generate Colang 2.x config
+- **`guardrails_k8s`** - Generate K8s deployment manifest
+
+### Qdrant — Vector Database for RAG
+- **`qdrant_test`** - Test connection to Qdrant
+- **`qdrant_collections`** - List vector collections
+- **`qdrant_create_collection`** - Create collection (auto-configures from embedding model)
+- **`qdrant_info`** - Get collection stats
+- **`qdrant_count`** - Count vectors in collection
+- **`qdrant_k8s`** - Generate K8s StatefulSet manifest
 
 ## Complete Command Reference
 
@@ -364,7 +389,7 @@ Terradev v1.5 integrates the full MoE serving stack:
 
 ## Supported Cloud Providers
 
-RunPod, Vast.ai, AWS, GCP, Azure, Lambda Labs, CoreWeave, TensorDock, Oracle Cloud, Crusoe Cloud, DigitalOcean, HyperStack, Alibaba Cloud, OVHcloud, FluidStack, Hetzner, SiliconFlow, Baseten, HuggingFace
+RunPod, Vast.ai, AWS, GCP, Azure, Lambda Labs, CoreWeave, TensorDock, Oracle Cloud, Crusoe Cloud, DigitalOcean, HyperStack, Alibaba Cloud, OVHcloud, FluidStack, Hetzner, SiliconFlow, Baseten, HuggingFace, Paperspace
 
 ## Environment Variables
 
@@ -399,6 +424,6 @@ Full multi-cloud setup:
 ## Links
 
 - [GitHub](https://github.com/theoddden/Terradev)
-- [PyPI](https://pypi.org/project/terradev-cli/) (v3.5.0)
-- [NPM](https://www.npmjs.com/package/terradev-mcp) (v2.0.1)
+- [PyPI](https://pypi.org/project/terradev-cli/) (v3.7.0)
+- [NPM](https://www.npmjs.com/package/terradev-mcp) (v2.0.3)
 - [Docs](https://theodden.github.io/Terradev/)

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Terradev MCP Server - GPU Cloud Provisioning for Claude Code
+Terradev MCP Server v5.2.0 - Complete Agentic GPU Infrastructure for Claude Code
 
-This MCP server provides access to Terradev CLI functionality for GPU provisioning,
-price comparison, Kubernetes cluster management, and inference deployment across
-20 cloud providers. Includes Terraform parallel provisioning for optimal efficiency.
+192 MCP tools: GPU provisioning, Kubernetes clusters, vLLM/SGLang/Ollama inference,
+Arize Phoenix trace observability, NeMo Guardrails output safety, Qdrant vector DB,
+Ray cluster management, W&B/LangSmith/MLflow/DVC, HuggingFace Hub, Datadog monitoring,
+data governance, cost optimization, and Terraform-powered parallel provisioning across
+20 cloud providers.
 """
 
 import argparse
@@ -194,6 +196,16 @@ async def estimate_model_memory(model_name: str) -> float:
     
     # Unknown model, return conservative estimate
     return 20
+
+# ── Datadog credential loader ────────────────────────────────────────────────
+def _load_datadog_creds() -> Dict[str, str]:
+    """Load Datadog credentials from ~/.terradev/credentials.json."""
+    creds_path = os.path.join(os.path.expanduser("~"), ".terradev", "credentials.json")
+    if os.path.exists(creds_path):
+        with open(creds_path, "r") as f:
+            all_creds = json.load(f)
+        return {k: v for k, v in all_creds.items() if k.startswith("datadog_")}
+    return {}
 
 # ── Persistent Terraform workspaces ──────────────────────────────────────────
 # Critical fix: Terraform state must survive beyond a single tool call.
@@ -825,6 +837,10 @@ variable "max_price" {
 
 # Create MCP server
 server = Server("terradev-mcp")
+
+# Import optimizer for tool compression and parallel dispatch
+from terradev_mcp_optimizer import MCPOptimizer
+optimizer = MCPOptimizer(enable_compression=True, strip_optional=True, enable_parallel=True)
 
 @server.list_tools()
 async def handle_list_tools() -> ListToolsResult:
@@ -3216,15 +3232,266 @@ async def handle_list_tools() -> ListToolsResult:
                 "required": ["cluster_name"]
             }
         ),
+
+        # ── v5.1.0: Datadog Integration ──────────────────────────────────
+
+        Tool(
+            name="datadog_status",
+            description="Check Datadog integration status: configured, site, API key presence.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="datadog_push_metrics",
+            description="Push current GPU cost snapshot to Datadog: active instances, cost/hr, projected monthly, provider reliability, quote latency.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="datadog_send_event",
+            description="Send a custom event to Datadog with title, text, and alert type.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Event title"},
+                    "text": {"type": "string", "description": "Event body (markdown supported)"},
+                    "alert_type": {"type": "string", "description": "Alert type", "enum": ["info", "warning", "error", "success"], "default": "info"},
+                },
+                "required": ["title", "text"]
+            }
+        ),
+        Tool(
+            name="datadog_create_monitors",
+            description="Create all Terradev GPU FinOps monitors in Datadog: budget alert, cost spike, idle GPU, spot volatility, provider degraded, egress anomaly.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "template": {"type": "string", "description": "Single template name (or omit for all)", "enum": ["budget_alert", "cost_spike", "idle_gpu", "spot_risk", "provider_degraded", "egress_anomaly"]},
+                }
+            }
+        ),
+        Tool(
+            name="datadog_list_monitors",
+            description="List all Terradev-tagged monitors in Datadog with their current status.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="datadog_create_dashboard",
+            description="Create the Terradev GPU FinOps dashboard in Datadog with 12 widgets: cost/hr, projected monthly, active GPUs, budget, provider reliability, volatility, latency, training util, egress, events.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Custom dashboard title (default: Terradev GPU FinOps)"},
+                }
+            }
+        ),
+        Tool(
+            name="datadog_list_dashboards",
+            description="List Terradev-related dashboards in Datadog.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="datadog_query",
+            description="Query Datadog metrics using the metrics query language. Returns time series data.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Datadog metric query (e.g. avg:terradev.gpu.cost_per_hour{*} by {provider})"},
+                    "from_seconds": {"type": "integer", "description": "Lookback window in seconds", "default": 3600},
+                },
+                "required": ["query"]
+            }
+        ),
+        Tool(
+            name="datadog_terraform_export",
+            description="Generate a complete Terraform module for the Datadog integration: provider.tf, monitors.tf, dashboard.tf, versions.tf. Run `terraform apply` to deploy all monitors and dashboards as IaC.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "output_dir": {"type": "string", "description": "Directory to write .tf files (default: ./datadog-terraform)"},
+                }
+            }
+        ),
+        Tool(
+            name="datadog_metric_catalog",
+            description="List all Terradev metrics that can be pushed to Datadog with their types, units, and tags.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        # ── v5.2.0: Arize Phoenix — LLM Trace Observability (ELv2) ──
+        Tool(
+            name="phoenix_test",
+            description="Test connection to Arize Phoenix server. Returns collector endpoint and project count.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="phoenix_projects",
+            description="List Phoenix projects (trace namespaces).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max projects to return", "default": 50},
+                }
+            }
+        ),
+        Tool(
+            name="phoenix_spans",
+            description="List recent spans for a Phoenix project. Supports SpanQuery DSL filters like \"span_kind == 'RETRIEVER'\" or \"status_code == 'ERROR'\".",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "description": "Project ID or name"},
+                    "filter": {"type": "string", "description": "SpanQuery DSL filter expression"},
+                    "limit": {"type": "integer", "description": "Max spans to return", "default": 20},
+                }
+            }
+        ),
+        Tool(
+            name="phoenix_trace",
+            description="View full execution tree for a specific trace ID. Shows span hierarchy, latencies, and token counts.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "trace_id": {"type": "string", "description": "Trace ID to inspect"},
+                    "project": {"type": "string", "description": "Project ID or name"},
+                },
+                "required": ["trace_id"]
+            }
+        ),
+        Tool(
+            name="phoenix_otel_env",
+            description="Generate OpenTelemetry environment variables for instrumenting serving pods with Phoenix tracing.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "description": "Project name"},
+                }
+            }
+        ),
+        Tool(
+            name="phoenix_snippet",
+            description="Generate Python instrumentation snippet for adding Phoenix tracing to LLM applications.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "description": "Project name"},
+                }
+            }
+        ),
+        Tool(
+            name="phoenix_k8s",
+            description="Generate Kubernetes deployment manifest for self-hosted Arize Phoenix server.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "namespace": {"type": "string", "description": "K8s namespace", "default": "observability"},
+                }
+            }
+        ),
+        # ── v5.2.0: NeMo Guardrails — LLM Output Safety (Apache 2.0) ──
+        Tool(
+            name="guardrails_test",
+            description="Test connection to NeMo Guardrails server.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="guardrails_chat",
+            description="Send a message through NeMo Guardrails and return the safety-filtered response. Applies topical, jailbreak, PII, and factcheck rails.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "Message to send through guardrails"},
+                    "config_id": {"type": "string", "description": "Guardrails config_id to use"},
+                },
+                "required": ["message"]
+            }
+        ),
+        Tool(
+            name="guardrails_generate_config",
+            description="Generate default Colang 2.x guardrails configuration files (topical, jailbreak, PII, factcheck rails).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "config_id": {"type": "string", "description": "Config ID name"},
+                    "output_dir": {"type": "string", "description": "Output directory", "default": "./guardrails"},
+                }
+            }
+        ),
+        Tool(
+            name="guardrails_k8s",
+            description="Generate Kubernetes deployment manifest for NeMo Guardrails server (standalone or sidecar mode).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "namespace": {"type": "string", "description": "K8s namespace", "default": "guardrails"},
+                }
+            }
+        ),
+        # ── v5.2.0: Qdrant — Vector Database for RAG (Apache 2.0) ──
+        Tool(
+            name="qdrant_test",
+            description="Test connection to Qdrant vector database. Returns cluster info and collection count.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="qdrant_collections",
+            description="List all Qdrant vector collections with their point counts and configurations.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="qdrant_create_collection",
+            description="Create a Qdrant vector collection. Auto-configures vector dimensions from embedding model name.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Collection name"},
+                    "embedding_model": {"type": "string", "description": "Embedding model (auto-sets vector size, e.g. BAAI/bge-large-en-v1.5)"},
+                }
+            }
+        ),
+        Tool(
+            name="qdrant_info",
+            description="Get detailed info and stats for a Qdrant collection.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Collection name"},
+                }
+            }
+        ),
+        Tool(
+            name="qdrant_count",
+            description="Count points (vectors) in a Qdrant collection.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Collection name"},
+                }
+            }
+        ),
+        Tool(
+            name="qdrant_k8s",
+            description="Generate Kubernetes StatefulSet manifest for self-hosted Qdrant vector database.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "namespace": {"type": "string", "description": "K8s namespace", "default": "vector-db"},
+                }
+            }
+        ),
     ]
     
-    return ListToolsResult(tools=tools)
+    # Compress tools to reduce token usage by ~60-80%
+    compressed_tools = optimizer.compress_tools(tools)
+    return ListToolsResult(tools=compressed_tools)
 
 @server.call_tool()
 async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
     """Handle tool calls"""
     tool_name = request.params.name
     arguments = request.params.arguments or {}
+    
+    # Expand compressed namespace tools back to original tool names
+    original_tool_name, original_arguments = optimizer.expand_call(tool_name, arguments)
+    tool_name = original_tool_name
+    arguments = original_arguments
     
     # Map tool names to terradev commands
     command_map = {
@@ -3407,6 +3674,35 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
         "k8s_mig_configure": ["k8s", "mig-configure"],
         "k8s_time_slicing": ["k8s", "time-slicing"],
         "k8s_monitoring_stack": ["k8s", "monitoring-stack"],
+        # v5.1.0: Datadog Integration — handled by custom elif blocks
+        "datadog_status": ["datadog", "status"],
+        "datadog_push_metrics": ["datadog", "push"],
+        "datadog_send_event": ["datadog", "event"],
+        "datadog_create_monitors": ["datadog", "monitors-create"],
+        "datadog_list_monitors": ["datadog", "monitors-list"],
+        "datadog_create_dashboard": ["datadog", "dashboard-create"],
+        "datadog_list_dashboards": ["datadog", "dashboard-list"],
+        "datadog_query": ["datadog", "query"],
+        "datadog_terraform_export": ["datadog", "terraform-export"],
+        "datadog_metric_catalog": ["datadog", "metric-catalog"],
+        # v5.2.0: Phoenix / Guardrails / Qdrant
+        "phoenix_test": ["phoenix", "test"],
+        "phoenix_projects": ["phoenix", "projects"],
+        "phoenix_spans": ["phoenix", "spans"],
+        "phoenix_trace": ["phoenix", "trace"],
+        "phoenix_otel_env": ["phoenix", "otel-env"],
+        "phoenix_snippet": ["phoenix", "snippet"],
+        "phoenix_k8s": ["phoenix", "k8s"],
+        "guardrails_test": ["guardrails", "test"],
+        "guardrails_chat": ["guardrails", "chat"],
+        "guardrails_generate_config": ["guardrails", "generate-config"],
+        "guardrails_k8s": ["guardrails", "k8s"],
+        "qdrant_test": ["qdrant", "test"],
+        "qdrant_collections": ["qdrant", "collections"],
+        "qdrant_create_collection": ["qdrant", "create-collection"],
+        "qdrant_info": ["qdrant", "info"],
+        "qdrant_count": ["qdrant", "count"],
+        "qdrant_k8s": ["qdrant", "k8s"],
     }
     
     if tool_name not in command_map:
@@ -6699,6 +6995,216 @@ async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
             return CallToolResult(content=[TextContent(type="text", text="❌ Terradev CLI not found.")], isError=True)
         except Exception as e:
             return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.1.0: Datadog Integration Handlers ────────────────────────────
+
+    elif tool_name == "datadog_status":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import get_status_summary, METRIC_CATALOG, MONITOR_TEMPLATES
+            # Load creds from ~/.terradev/credentials.json
+            creds = _load_datadog_creds()
+            status = get_status_summary(creds)
+            status["available_metrics"] = len(METRIC_CATALOG)
+            status["available_monitors"] = list(MONITOR_TEMPLATES.keys())
+            output_text = "🐕 **Datadog Integration Status**\n\n"
+            output_text += f"```json\n{json.dumps(status, indent=2)}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "datadog_push_metrics":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import push_cost_snapshot
+            creds = _load_datadog_creds()
+            result = await push_cost_snapshot(creds)
+            output_text = "📤 **Datadog Metrics Push**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "datadog_send_event":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import send_event_async
+            creds = _load_datadog_creds()
+            result = await send_event_async(
+                creds, title=arguments["title"], text=arguments["text"],
+                alert_type=arguments.get("alert_type", "info"),
+            )
+            output_text = "📨 **Datadog Event Sent**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "datadog_create_monitors":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import create_monitor, create_all_monitors
+            creds = _load_datadog_creds()
+            template = arguments.get("template")
+            if template:
+                result = await create_monitor(creds, template)
+            else:
+                result = await create_all_monitors(creds)
+            output_text = "🔔 **Datadog Monitors**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "datadog_list_monitors":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import list_monitors
+            creds = _load_datadog_creds()
+            result = await list_monitors(creds)
+            output_text = "📋 **Terradev Monitors in Datadog**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:4000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "datadog_create_dashboard":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import create_dashboard
+            creds = _load_datadog_creds()
+            result = await create_dashboard(creds, custom_title=arguments.get("title"))
+            output_text = "📊 **Datadog Dashboard Created**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "datadog_list_dashboards":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import list_dashboards
+            creds = _load_datadog_creds()
+            result = await list_dashboards(creds)
+            output_text = "📋 **Terradev Dashboards in Datadog**\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:3000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "datadog_query":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import query_metrics
+            creds = _load_datadog_creds()
+            result = await query_metrics(creds, query=arguments["query"],
+                                          from_seconds=arguments.get("from_seconds", 3600))
+            output_text = f"🔍 **Datadog Query:** `{arguments['query']}`\n\n"
+            output_text += f"```json\n{json.dumps(result, indent=2, default=str)[:5000]}\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "datadog_terraform_export":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import generate_full_terraform_module
+            creds = _load_datadog_creds()
+            out_dir = arguments.get("output_dir", "./datadog-terraform")
+            files = generate_full_terraform_module(creds)
+            os.makedirs(out_dir, exist_ok=True)
+            written = []
+            for fname, content in files.items():
+                fpath = os.path.join(out_dir, fname)
+                with open(fpath, "w") as f:
+                    f.write(content)
+                written.append(fpath)
+            output_text = f"🏗️ **Terraform Module Exported → `{out_dir}/`**\n\n"
+            output_text += "**Files:**\n" + "\n".join(f"- `{w}`" for w in written)
+            output_text += f"\n\n**Next steps:**\n```bash\ncd {out_dir}\nterraform init\nterraform plan\nterraform apply\n```"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    elif tool_name == "datadog_metric_catalog":
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Terradev"))
+            from terradev_cli.integrations.datadog_integration import METRIC_CATALOG
+            output_text = "📖 **Terradev Metric Catalog for Datadog**\n\n"
+            output_text += f"**{len(METRIC_CATALOG)} metrics available:**\n\n"
+            for name, meta in METRIC_CATALOG.items():
+                tags = ", ".join(meta.get("tags", []))
+                output_text += f"- `{name}` ({meta['type']}, {meta['unit']}) — {meta['desc']}"
+                if tags:
+                    output_text += f" [tags: {tags}]"
+                output_text += "\n"
+            return CallToolResult(content=[TextContent(type="text", text=output_text)])
+        except Exception as e:
+            return CallToolResult(content=[TextContent(type="text", text=f"❌ {e}")], isError=True)
+
+    # ── v5.2.0: Phoenix / Guardrails / Qdrant argument builders ──────────
+
+    elif tool_name == "phoenix_projects":
+        if arguments.get("limit"):
+            cmd_args.extend(["--limit", str(arguments["limit"])])
+
+    elif tool_name == "phoenix_spans":
+        if arguments.get("project"):
+            cmd_args.extend(["--project", arguments["project"]])
+        if arguments.get("filter"):
+            cmd_args.extend(["--filter", arguments["filter"]])
+        if arguments.get("limit"):
+            cmd_args.extend(["--limit", str(arguments["limit"])])
+
+    elif tool_name == "phoenix_trace":
+        cmd_args.extend(["--trace-id", arguments["trace_id"]])
+        if arguments.get("project"):
+            cmd_args.extend(["--project", arguments["project"]])
+
+    elif tool_name == "phoenix_otel_env":
+        if arguments.get("project"):
+            cmd_args.extend(["--project", arguments["project"]])
+
+    elif tool_name == "phoenix_snippet":
+        if arguments.get("project"):
+            cmd_args.extend(["--project", arguments["project"]])
+
+    elif tool_name == "phoenix_k8s":
+        if arguments.get("namespace"):
+            cmd_args.extend(["--namespace", arguments["namespace"]])
+
+    elif tool_name == "guardrails_chat":
+        cmd_args.extend(["--message", arguments["message"]])
+        if arguments.get("config_id"):
+            cmd_args.extend(["--config-id", arguments["config_id"]])
+
+    elif tool_name == "guardrails_generate_config":
+        if arguments.get("config_id"):
+            cmd_args.extend(["--config-id", arguments["config_id"]])
+        if arguments.get("output_dir"):
+            cmd_args.extend(["--output-dir", arguments["output_dir"]])
+
+    elif tool_name == "guardrails_k8s":
+        if arguments.get("namespace"):
+            cmd_args.extend(["--namespace", arguments["namespace"]])
+
+    elif tool_name == "qdrant_create_collection":
+        if arguments.get("name"):
+            cmd_args.extend(["--name", arguments["name"]])
+        if arguments.get("embedding_model"):
+            cmd_args.extend(["--embedding-model", arguments["embedding_model"]])
+
+    elif tool_name == "qdrant_info":
+        if arguments.get("name"):
+            cmd_args.extend(["--name", arguments["name"]])
+
+    elif tool_name == "qdrant_count":
+        if arguments.get("name"):
+            cmd_args.extend(["--name", arguments["name"]])
+
+    elif tool_name == "qdrant_k8s":
+        if arguments.get("namespace"):
+            cmd_args.extend(["--namespace", arguments["namespace"]])
 
     # Execute the command (generic fallback for simple tools)
     result = await execute_terradev_command(cmd_args)

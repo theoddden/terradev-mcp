@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+demo/
+.git/
+.github/
+*.gz
+*.tgz

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Terradev MCP Server v2.0.4 - Complete Agentic GPU Infrastructure for Claude Code
+Terradev MCP Server v2.0.5 - Complete Agentic GPU Infrastructure for Claude Code
 
 192 MCP tools: GPU provisioning, Kubernetes clusters, vLLM/SGLang/Ollama inference,
 Arize Phoenix trace observability, NeMo Guardrails output safety, Qdrant vector DB,
@@ -842,10 +842,8 @@ server = Server("terradev-mcp")
 from terradev_mcp_optimizer import MCPOptimizer
 optimizer = MCPOptimizer(enable_compression=True, strip_optional=True, enable_parallel=True)
 
-@server.list_tools()
-async def handle_list_tools() -> ListToolsResult:
-    """List available Terradev tools"""
-    tools = [
+# ── Pre-compiled Tool Schemas (built once at module load) ────────────────────
+_ALL_TOOLS = [
         Tool(
             name="quote_gpu",
             description="Get real-time GPU prices across 20 cloud providers (incl. Alibaba, OVHcloud, FluidStack, Hetzner, SiliconFlow)",
@@ -3476,11 +3474,15 @@ async def handle_list_tools() -> ListToolsResult:
                 }
             }
         ),
-    ]
-    
-    # Compress tools to reduce token usage by ~60-80%
-    compressed_tools = optimizer.compress_tools(tools)
-    return ListToolsResult(tools=compressed_tools)
+]
+
+# Pre-compress at module load — cached for all subsequent list_tools calls
+_COMPRESSED_TOOLS = optimizer.compress_tools(_ALL_TOOLS)
+
+@server.list_tools()
+async def handle_list_tools() -> ListToolsResult:
+    """List available Terradev tools (pre-compiled + compressed)"""
+    return ListToolsResult(tools=_COMPRESSED_TOOLS)
 
 @server.call_tool()
 async def handle_call_tool(request: CallToolRequest) -> CallToolResult:

@@ -1,4 +1,4 @@
-# Terradev MCP Server v2.0.4
+# Terradev MCP Server v2.0.5
 
 Complete Agentic GPU Infrastructure for Claude Code — **192 MCP tools**: GPU provisioning, vLLM/SGLang/Ollama inference, Arize Phoenix observability, NeMo Guardrails safety, Qdrant vector DB, Ray cluster management, Datadog monitoring, and Terraform-powered parallel provisioning across 20 cloud providers.
 
@@ -6,7 +6,7 @@ Complete Agentic GPU Infrastructure for Claude Code — **192 MCP tools**: GPU p
   <img src="https://raw.githubusercontent.com/theoddden/terradev-mcp/main/demo/terradev-mcp-demo.gif" alt="Terradev MCP Demo" width="800">
 </p>
 
-## What's New in v2.0.4
+## What's New in v2.0.5
 
 - **192 MCP Tools**: Massively expanded from 69 → 192 tools
 - **Arize Phoenix**: LLM trace observability — projects, spans, traces, OTEL env, K8s deployment (7 tools)
@@ -425,5 +425,5 @@ Full multi-cloud setup:
 
 - [GitHub](https://github.com/theoddden/Terradev)
 - [PyPI](https://pypi.org/project/terradev-cli/) (v3.7.0)
-- [NPM](https://www.npmjs.com/package/terradev-mcp) (v2.0.4)
+- [NPM](https://www.npmjs.com/package/terradev-mcp) (v2.0.5)
 - [Docs](https://theodden.github.io/Terradev/)

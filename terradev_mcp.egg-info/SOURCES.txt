@@ -1,0 +1,10 @@
+LICENSE
+README.md
+pyproject.toml
+demo/generate_mcp_gif.py
+terradev_mcp.egg-info/PKG-INFO
+terradev_mcp.egg-info/SOURCES.txt
+terradev_mcp.egg-info/dependency_links.txt
+terradev_mcp.egg-info/entry_points.txt
+terradev_mcp.egg-info/requires.txt
+terradev_mcp.egg-info/top_level.txt

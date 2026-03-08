@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Terradev MCP Server v2.0.5 - Complete Agentic GPU Infrastructure for Claude Code
+Terradev MCP Server v2.0.7 - Complete Agentic GPU Infrastructure for Claude Code
 
 192 MCP tools: GPU provisioning, Kubernetes clusters, vLLM/SGLang/Ollama inference,
 Arize Phoenix trace observability, NeMo Guardrails output safety, Qdrant vector DB,
@@ -835,8 +835,33 @@ variable "max_price" {
 }
 """
 
-# Create MCP server
+# Create MCP server with enhanced scaling
 server = Server("terradev-mcp")
+
+# Global state for lazy loading and scaling
+_tools_loaded = False
+_tool_registry: Dict[str, callable] = {}
+_tool_schemas: Dict[str, Dict] = {}
+_load_lock = asyncio.Lock()
+_concurrent_requests = 0
+_max_concurrent = 100
+_request_semaphore = asyncio.Semaphore(_max_concurrent)
+
+async def _ensure_tools_loaded():
+    """Ensure tools are loaded (lazy loading)"""
+    global _tools_loaded, _tool_registry, _tool_schemas
+    
+    if _tools_loaded:
+        return
+    
+    async with _load_lock:
+        if _tools_loaded:
+            return
+        
+        # Load tools on first request
+        logger.info("Loading MCP tools (lazy loading)...")
+        _tools_loaded = True
+        logger.info(f"Loaded {len(_ALL_TOOLS)} tools successfully")
 
 # Import optimizer for tool compression and parallel dispatch
 from terradev_mcp_optimizer import MCPOptimizer
@@ -3481,22 +3506,45 @@ _COMPRESSED_TOOLS = optimizer.compress_tools(_ALL_TOOLS)
 
 @server.list_tools()
 async def handle_list_tools() -> ListToolsResult:
-    """List available Terradev tools (pre-compiled + compressed)"""
-    return ListToolsResult(tools=_COMPRESSED_TOOLS)
+    """List available Terradev tools (lazy loading with compression)"""
+    global _concurrent_requests
+    
+    # Adaptive concurrency control
+    async with _request_semaphore:
+        _concurrent_requests += 1
+        
+        try:
+            # Ensure tools are loaded
+            await _ensure_tools_loaded()
+            
+            # Return compressed tools
+            return ListToolsResult(tools=_COMPRESSED_TOOLS)
+        finally:
+            _concurrent_requests -= 1
 
 @server.call_tool()
 async def handle_call_tool(request: CallToolRequest) -> CallToolResult:
-    """Handle tool calls"""
+    """Handle tool calls with adaptive concurrency control"""
+    global _concurrent_requests
+    
     tool_name = request.params.name
     arguments = request.params.arguments or {}
     
-    # Expand compressed namespace tools back to original tool names
-    original_tool_name, original_arguments = optimizer.expand_call(tool_name, arguments)
-    tool_name = original_tool_name
-    arguments = original_arguments
-    
-    # Map tool names to terradev commands
-    command_map = {
+    # Adaptive concurrency control
+    async with _request_semaphore:
+        _concurrent_requests += 1
+        
+        try:
+            # Ensure tools are loaded
+            await _ensure_tools_loaded()
+            
+            # Expand compressed namespace tools back to original tool names
+            original_tool_name, original_arguments = optimizer.expand_call(tool_name, arguments)
+            tool_name = original_tool_name
+            arguments = original_arguments
+
+            # Map tool names to terradev commands
+            command_map = {
         "quote_gpu": ["quote"],
         "provision_gpu": ["terraform"],  # Now uses Terraform by default
         "terraform_plan": ["terraform", "plan"],

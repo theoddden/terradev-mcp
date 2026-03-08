@@ -1,0 +1,52 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.theoddden/terradev",
+  "description": "Complete GPU infrastructure for Claude Code — 192 MCP tools for provisioning, training, inference",
+  "repository": {
+    "url": "https://github.com/theoddden/terradev-mcp",
+    "source": "github"
+  },
+  "version": "2.0.6",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "terradev-mcp",
+      "version": "2.0.6",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "Terradev API key for GPU cloud providers",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "name": "TERRADEV_API_KEY"
+        },
+        {
+          "description": "Path to Terradev credentials file",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "TERRADEV_CREDENTIALS_FILE"
+        },
+        {
+          "description": "Default GPU cloud provider",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "TERRADEV_PROVIDER"
+        }
+      ]
+    }
+  ],
+  "categories": [
+    "infrastructure",
+    "machine-learning",
+    "cloud-computing",
+    "gpu",
+    "automation"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/theoddden/terradev-mcp#readme"
+}

@@ -1,1 +1,66 @@
-{"name": "terradev-mcp", "version": "2.0.5", "description": "Complete Agentic GPU Infrastructure for Claude Code \u2014 192 MCP tools: Full training lifecycle, inference deployment with cost guardrails, Ray cluster management (Wide-EP, disaggregated P/D, parallelism strategy), vLLM lifecycle (start/stop/sleep/wake/inference), SGLang (expert parallel, metrics), Ollama (pull/chat/generate), Arize Phoenix LLM trace observability, NeMo Guardrails output safety, Qdrant vector DB for RAG, W&B experiment tracking, LangSmith GPU-cost correlation, LangChain/LangGraph workflows, MLflow model registry, DVC checkpoint staging, KServe InferenceService generation, HuggingFace Hub + Smart Templates, Datadog monitoring, data governance, egress optimization, manifest-cached provisioning with drift detection, smart deployment, model orchestrator, warm pool, budget-aware auto-scaling, workflow pipelines, GitOps, InferX serverless, HuggingFace Spaces, session-state resources, agent-oriented recommendations, cost confirmation gates, and Terraform-powered parallel provisioning across 20 cloud providers", "main": "terradev_mcp.py", "bin": {"terradev-mcp": "terradev_mcp.py"}, "scripts": {"test": "python3 terradev_mcp.py"}, "keywords": ["gpu", "cloud", "mcp", "claude", "ai", "ml", "kubernetes", "inference", "terraform", "parallel", "multi-cloud", "numa", "disaggregated-inference", "moe", "qwen", "runpod", "distserve", "xcd", "mi300x", "h200", "prefill-decode", "ray-serve", "expert-parallelism", "nixl", "eplb", "deepep", "deepgemm", "sglang", "vllm", "kv-cache", "alibaba", "ovhcloud", "fluidstack", "hetzner", "siliconflow"], "author": "Terradev", "license": "MIT", "repository": {"type": "git", "url": "git+https://github.com/theoddden/terradev-mcp.git"}, "engines": {"node": ">=14"}, "dependencies": {"mcp": "^1.0.0"}, "optionalDependencies": {"boto3": "^1.26.0", "aiohttp": "^3.8.0"}}
+{
+  "name": "terradev-mcp",
+  "version": "2.0.6",
+  "mcpName": "io.github.theoddden/terradev",
+  "description": "Complete Agentic GPU Infrastructure for Claude Code — 192 MCP tools: Full training lifecycle, inference deployment with cost guardrails, Ray cluster management (Wide-EP, disaggregated P/D, parallelism strategy), vLLM lifecycle (start/stop/sleep/wake/inference), SGLang (expert parallel, metrics), Ollama (pull/chat/generate), Arize Phoenix LLM trace observability, NeMo Guardrails output safety, Qdrant vector DB for RAG, W&B experiment tracking, LangSmith GPU-cost correlation, LangChain/LangGraph workflows, MLflow model registry, DVC checkpoint staging, KServe InferenceService generation, HuggingFace Hub + Smart Templates, Datadog monitoring, data governance, egress optimization, manifest-cached provisioning with drift detection, smart deployment, model orchestrator, warm pool, budget-aware auto-scaling, workflow pipelines, GitOps, InferX serverless, HuggingFace Spaces, session-state resources, agent-oriented recommendations, cost confirmation gates, and Terraform-powered parallel provisioning across 20 cloud providers",
+  "main": "terradev_mcp.py",
+  "bin": {
+    "terradev-mcp": "terradev_mcp.py"
+  },
+  "scripts": {
+    "test": "python3 terradev_mcp.py"
+  },
+  "keywords": [
+    "gpu",
+    "cloud",
+    "mcp",
+    "claude",
+    "ai",
+    "ml",
+    "kubernetes",
+    "inference",
+    "terraform",
+    "parallel",
+    "multi-cloud",
+    "numa",
+    "disaggregated-inference",
+    "moe",
+    "qwen",
+    "runpod",
+    "distserve",
+    "xcd",
+    "mi300x",
+    "h200",
+    "prefill-decode",
+    "ray-serve",
+    "expert-parallelism",
+    "nixl",
+    "eplb",
+    "deepep",
+    "deepgemm",
+    "sglang",
+    "vllm",
+    "kv-cache",
+    "alibaba",
+    "ovhcloud",
+    "fluidstack",
+    "hetzner",
+    "siliconflow"
+  ],
+  "author": "Terradev",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theoddden/terradev-mcp.git"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "dependencies": {
+    "mcp": "^1.0.0"
+  },
+  "optionalDependencies": {
+    "boto3": "^1.26.0",
+    "aiohttp": "^3.8.0"
+  }
+}
